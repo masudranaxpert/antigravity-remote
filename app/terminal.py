@@ -40,10 +40,13 @@ def encode_ws_frame(payload: bytes, opcode: int = 1) -> bytes:
 
 
 def read_exact(sock, n: int) -> bytes:
-    """Read exactly n bytes from a socket, or return empty bytes on EOF."""
+    """Read exactly n bytes from a socket, or return empty bytes on EOF or reset."""
     buf = bytearray()
     while len(buf) < n:
-        chunk = sock.recv(n - len(buf))
+        try:
+            chunk = sock.recv(n - len(buf))
+        except (ConnectionResetError, BrokenPipeError, OSError):
+            return bytes()
         if not chunk:
             return bytes()
         buf.extend(chunk)
@@ -230,11 +233,17 @@ class TerminalSession:
                     continue
 
                 if opcode in (1, 2):  # Text or Binary
-                    # Check for JSON control packet (e.g. resize)
+                    # Check for JSON control packet (e.g. resize, ping)
                     if payload.startswith(b'{"') and b'"type"' in payload:
                         try:
                             ctrl = json.loads(payload.decode("utf-8"))
-                            if ctrl.get("type") == "resize":
+                            msg_type = ctrl.get("type")
+                            if msg_type == "ping":
+                                with self.lock:
+                                    if self.alive:
+                                        self.sock.sendall(encode_ws_frame(b'{"type":"pong"}', opcode=1))
+                                continue
+                            if msg_type == "resize":
                                 r = int(ctrl.get("rows", 24))
                                 c = int(ctrl.get("cols", 80))
                                 if self.master_fd is not None:
@@ -242,6 +251,15 @@ class TerminalSession:
                                 continue
                         except Exception:
                             pass
+
+                    # Filter out SGR/X10 mouse tracking escape sequences from mobile clicks/touches
+                    if payload.startswith(b"\x1b[<") or payload.startswith(b"\x1b[M"):
+                        continue
+                    if b"\x1b[<" in payload:
+                        import re
+                        payload = re.sub(rb"\x1b\[<[0-9;]+[Mm]", b"", payload)
+                        if not payload:
+                            continue
 
                     # Raw terminal keystrokes / input
                     if self.master_fd is not None:

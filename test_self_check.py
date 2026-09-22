@@ -233,8 +233,24 @@ def run_checks():
             except Exception:
                 break
         assert b"WS_LIVE_OK" in accumulated, f"Expected WS_LIVE_OK in PTY output, got: {accumulated}"
+
+        # Send WebSocket heartbeat ping and verify pong
+        ping_bytes = b'{"type":"ping"}'
+        mask_p = b"\x55\x66\x77\x88"
+        masked_ping = bytes(b ^ mask_p[i % 4] for i, b in enumerate(ping_bytes))
+        ws_sock.sendall(bytearray([0x81, 0x80 | len(ping_bytes)]) + mask_p + masked_ping)
+        time.sleep(0.1)
+        pong_in = ws_sock.recv(1024)
+        assert b'"type":"pong"' in pong_in or b"pong" in pong_in, f"Expected pong response, got {pong_in}"
+
+        # Send SGR mouse report and verify it is filtered out
+        mouse_bytes = b"\x1b[<35;9;3M"
+        masked_mouse = bytes(b ^ mask_p[i % 4] for i, b in enumerate(mouse_bytes))
+        ws_sock.sendall(bytearray([0x81, 0x80 | len(mouse_bytes)]) + mask_p + masked_mouse)
+        time.sleep(0.1)
+
         ws_sock.close()
-        print("PASS: Live WebSocket terminal interactive session verified")
+        print("PASS: Live WebSocket terminal interactive session & heartbeat keep-alive verified")
 
         # I. Invalid token rejection check
         try:

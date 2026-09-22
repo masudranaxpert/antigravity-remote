@@ -256,6 +256,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             })
 
         if path.startswith("/static/"):
+            if path.endswith(".map"):
+                self.send_response(204)
+                self.end_headers()
+                return
+
             rel_path = path[len("/static/"):].lstrip("/")
             safe_path = os.path.normpath(os.path.join(STATIC_DIR, rel_path))
             if not (safe_path == STATIC_DIR or safe_path.startswith(STATIC_DIR + os.sep)) or not os.path.isfile(safe_path):

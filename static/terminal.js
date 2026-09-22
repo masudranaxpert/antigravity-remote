@@ -1,6 +1,7 @@
 /**
  * Antigravity Remote - Interactive Mobile Terminal Controller
- * Manages xterm.js instance, RFC 6455 WebSocket bridge, and touch accessories.
+ * Manages xterm.js instance, RFC 6455 WebSocket bridge, keep-alive heartbeat,
+ * auto-reconnect, and mobile touch accessories.
  */
 (function () {
   'use strict';
@@ -12,6 +13,10 @@
   let currentFontSize = 13;
   let reconnectTimer = null;
   let toastTimer = null;
+  let heartbeatTimer = null;
+  let reconnectAttempts = 0;
+  let isManuallyClosed = false;
+  const MAX_RECONNECT_ATTEMPTS = 15;
 
   // Visual Studio Dark Palette for xterm.js
   const STUDIO_THEME = {
@@ -101,6 +106,38 @@
     }
   }
 
+  function startHeartbeat() {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      }
+    }, 15000); // 15s keep-alive interval prevents Cloudflare tunnel / mobile idle timeouts
+  }
+
+  function stopHeartbeat() {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  }
+
+  function scheduleReconnect() {
+    if (isManuallyClosed) return;
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      setStatus(false, 'disconnected (max retries)');
+      showToast('Terminal connection dropped. Tap refresh button to reconnect.', 'err');
+      return;
+    }
+    reconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(1.4, reconnectAttempts), 6000);
+    setStatus(false, `reconnecting (${reconnectAttempts})...`);
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      connectWebSocket();
+    }, delay);
+  }
+
   function initTerminal() {
     const container = document.getElementById('terminal-container');
     if (!container) return;
@@ -125,6 +162,9 @@
 
     term.open(container);
 
+    // Disable SGR and DEC mouse reporting modes to eliminate garbage clicks (e.g. 35;9;3M)
+    term.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l');
+
     if (fitAddon) {
       setTimeout(() => {
         fitAddon.fit();
@@ -133,6 +173,11 @@
 
     // Process keystrokes typed by user
     term.onData((data) => {
+      // Filter out SGR/X10 mouse tracking sequences sent on mobile screen taps (e.g. \x1b[<35;9;3M)
+      if (data.startsWith('\x1b[<') || data.startsWith('\x1b[M')) {
+        return;
+      }
+
       if (isCtrlActive && data.length === 1) {
         // Apply sticky Ctrl modifier to single character
         const code = data.charCodeAt(0);
@@ -152,7 +197,7 @@
 
   function connectWebSocket() {
     clearTimeout(reconnectTimer);
-    setStatus(false, 'connecting...');
+    setStatus(false, reconnectAttempts > 0 ? `reconnecting...` : 'connecting...');
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const cols = term ? term.cols : 80;
@@ -160,16 +205,27 @@
     const wsUrl = `${protocol}//${location.host}/api/terminal/ws?cols=${cols}&rows=${rows}`;
 
     try {
+      if (ws) {
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onclose = null;
+        ws.onerror = null;
+        try { ws.close(); } catch (_) {}
+      }
       ws = new WebSocket(wsUrl);
     } catch (err) {
       setStatus(false, 'connection error');
       showToast('WebSocket error: ' + err.message, 'err');
+      scheduleReconnect();
       return;
     }
 
     ws.onopen = () => {
+      reconnectAttempts = 0;
+      isManuallyClosed = false;
+      startHeartbeat();
       setStatus(true, 'bash • remote');
-      showToast('Connected to host terminal', 'ok');
+      showToast(reconnectAttempts > 0 ? 'Terminal reconnected' : 'Connected to host terminal', 'ok');
       if (fitAddon && term) {
         fitAddon.fit();
         sendResize(term.cols, term.rows);
@@ -179,17 +235,26 @@
 
     ws.onmessage = (event) => {
       if (term) {
+        // Discard ping/pong control JSON from output
+        if (typeof event.data === 'string' && event.data.includes('"type":"pong"')) {
+          return;
+        }
         term.write(event.data);
       }
     };
 
     ws.onclose = () => {
-      setStatus(false, 'disconnected');
-      showToast('Terminal session closed', 'err');
+      stopHeartbeat();
+      if (!isManuallyClosed) {
+        scheduleReconnect();
+      } else {
+        setStatus(false, 'disconnected');
+      }
     };
 
     ws.onerror = () => {
-      setStatus(false, 'error');
+      stopHeartbeat();
+      scheduleReconnect();
     };
   }
 
@@ -283,9 +348,11 @@
     const reconnectBtn = document.getElementById('reconnect-btn');
     if (reconnectBtn) {
       reconnectBtn.addEventListener('click', () => {
-        if (ws) {
-          try { ws.close(); } catch (_) {}
-        }
+        reconnectAttempts = 0;
+        isManuallyClosed = false;
+        clearTimeout(reconnectTimer);
+        stopHeartbeat();
+        showToast('Reconnecting terminal...', 'ok');
         connectWebSocket();
       });
     }
