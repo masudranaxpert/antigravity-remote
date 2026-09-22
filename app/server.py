@@ -199,6 +199,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
             remote_info = get_official_remote_info(current_email)
             remote_url = remote_info.get("url", "")
 
+            # Reconcile sleep inhibitor with desired state configuration
+            desired_sleep = bool(st.get("prevent_sleep", True))
+            if desired_sleep and not get_sleep_inhibit_status():
+                set_sleep_inhibit(True)
+            elif not desired_sleep and get_sleep_inhibit_status():
+                set_sleep_inhibit(False)
+
             return self.send_json({
                 "accounts": accounts,
                 "current": current_email,

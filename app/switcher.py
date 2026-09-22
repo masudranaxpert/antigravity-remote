@@ -264,13 +264,15 @@ def set_sleep_inhibit(enable: bool):
         if not inhibit_bin:
             return False
 
-        def preexec():
+        if _sleep_inhibit_proc:
             try:
-                import ctypes
-                libc = ctypes.CDLL("libc.so.6")
-                libc.prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+                if _sleep_inhibit_proc.stdin:
+                    _sleep_inhibit_proc.stdin.close()
+                _sleep_inhibit_proc.terminate()
+                _sleep_inhibit_proc.wait(timeout=1)
             except Exception:
                 pass
+            _sleep_inhibit_proc = None
 
         for what in ("sleep:idle:handle-lid-switch", "sleep:idle"):
             try:
@@ -280,12 +282,11 @@ def set_sleep_inhibit(enable: bool):
                         f"--what={what}",
                         "--who=Antigravity Remote",
                         "--why=Prevent host suspend while remote gateway is active",
-                        "sleep",
-                        "infinity",
+                        "cat",
                     ],
+                    stdin=subprocess.PIPE,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    preexec_fn=preexec,
                 )
                 time.sleep(0.05)
                 if proc.poll() is None:
@@ -297,6 +298,8 @@ def set_sleep_inhibit(enable: bool):
     else:
         if _sleep_inhibit_proc and _sleep_inhibit_proc.poll() is None:
             try:
+                if _sleep_inhibit_proc.stdin:
+                    _sleep_inhibit_proc.stdin.close()
                 _sleep_inhibit_proc.terminate()
                 _sleep_inhibit_proc.wait(timeout=1.5)
             except Exception:
