@@ -22,19 +22,23 @@ sudo dnf install python3 libsecret
 
 Additionally, install and configure [Antigravity-Manager (lbjlaq/Antigravity-Manager)](https://github.com/lbjlaq/Antigravity-Manager) to add and manage your Google accounts.
 
-### 2. Install Cloudflared (Quick Tunnel)
-Download and install the official Cloudflare tunnel binary:
+### 2. Install Cloudflared (Tunnel Provider)
+Install `cloudflared` system-wide so both your user and background system services have direct access:
 
 ```bash
-# Ubuntu / Debian (.deb package)
-curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o /tmp/cloudflared.deb
-sudo dpkg -i /tmp/cloudflared.deb
+# Official Cloudflare APT Repository (Ubuntu / Debian)
+sudo mkdir -p --mode=0755 /usr/share/keyrings
+curl -fsSL https://pkg.cloudflare.com/cloudflare-public-v2.gpg | sudo tee /usr/share/keyrings/cloudflare-public-v2.gpg >/dev/null
+echo 'deb [signed-by=/usr/share/keyrings/cloudflare-public-v2.gpg] https://pkg.cloudflare.com/cloudflared any main' | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt update && sudo apt install -y cloudflared
 
-# Or standalone user binary (No sudo required)
-mkdir -p ~/.local/bin
-curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o ~/.local/bin/cloudflared
-chmod +x ~/.local/bin/cloudflared
+# Or standalone system binary
+sudo curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
+sudo chmod +x /usr/local/bin/cloudflared
 ```
+
+> [!TIP]
+> Want a permanent URL with your own domain that never changes? See the [Permanent Custom Domain Guide](custom-domain-tunnel.md).
 
 ### 3. Clone and Initialize
 ```bash

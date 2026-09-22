@@ -52,6 +52,7 @@ https://<your-tunnel>.trycloudflare.com/?token=<your-token>
 
 - [Architecture & Security](docs/architecture.md): Internal mechanics, JWT decoding, and credential injection.
 - [Setup & Deployment](docs/setup-guide.md): Step-by-step setup for Linux and Windows.
+- [Permanent Custom Domain](docs/custom-domain-tunnel.md): Configure fixed permanent URLs via Cloudflare Zero Trust (never expires).
 - [Troubleshooting](docs/troubleshooting.md): Common questions and solutions.
 
 ---
