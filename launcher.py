@@ -53,8 +53,77 @@ def load_token():
     return ""
 
 
+def parse_mode(args, st_data):
+    """Determine operational tunnel mode from CLI flags and state.json."""
+    if any(a in args for a in ("--quick", "-q", "--try")):
+        return "quick"
+    if any(a in args for a in ("--permanent", "-p")):
+        return "permanent"
+    if any(a in args for a in ("--dual", "-d")):
+        return "dual"
+    if any(a in args for a in ("--local", "-l")):
+        return "local"
+    return st_data.get("tunnel_mode", "auto").lower()
+
+
+def start_quick_tunnel(port):
+    """Boot ephemeral Cloudflare Quick Tunnel and capture trycloudflare.com URL."""
+    cloudflared_bin = "/usr/local/bin/cloudflared" if os.path.exists("/usr/local/bin/cloudflared") else os.path.expanduser("~/.local/bin/cloudflared")
+    if not os.path.exists(cloudflared_bin):
+        cloudflared_bin = "cloudflared"
+
+    cmd = [
+        cloudflared_bin,
+        "tunnel",
+        "--no-autoupdate",
+        "--url",
+        f"http://127.0.0.1:{port}",
+    ]
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+    except Exception as e:
+        print(f"\033[91m[✗] Failed to launch cloudflared: {e}\033[0m", file=sys.stderr)
+        return None, None
+
+    url_pattern = re.compile(r"https://[-a-z0-9.]+\.trycloudflare\.com")
+    tunnel_url = None
+    for line in proc.stdout:
+        m = url_pattern.search(line)
+        if m:
+            tunnel_url = m.group(0)
+            break
+        if "error" in line.lower() and "failed" in line.lower():
+            print(f"\033[93m[cloudflared]\033[0m {line.strip()}", flush=True)
+
+    return proc, tunnel_url
+
+
 def main():
     global tunnel_proc
+    args = sys.argv[1:]
+
+    if "-h" in args or "--help" in args:
+        print("""Antigravity Remote Launcher
+
+Usage:
+  python3 launcher.py [OPTIONS]
+
+Options:
+  --quick, -q, --try      Force Cloudflare Quick Tunnel (*.trycloudflare.com)
+  --permanent, -p         Force Cloudflare Zero Trust Permanent Named Tunnel
+  --dual, -d              Run both Permanent Domain and Quick Tunnel simultaneously
+  --local, -l             Localhost only (no public cloud tunnel)
+  --help, -h              Show this help message
+""")
+        sys.exit(0)
+
     signal.signal(signal.SIGINT, cleanup_and_exit)
     signal.signal(signal.SIGTERM, cleanup_and_exit)
 
@@ -78,7 +147,7 @@ def main():
         print("\033[91m[✗] Failed to start local server on port 8077.\033[0m", file=sys.stderr)
         sys.exit(1)
 
-    # 2. Check for Permanent Cloudflare System Service Tunnel
+    # 2. Check Systemd Cloudflare Service & Determine Mode
     token = load_token()
     is_service_active = False
     try:
@@ -96,84 +165,96 @@ def main():
             pass
 
     custom_domain = st_data.get("custom_domain", "").strip()
+    mode = parse_mode(args, st_data)
 
-    if is_service_active:
-        print("\033[92m[✓] Detected active Cloudflare Zero Trust permanent system service.\033[0m", flush=True)
-        tunnel_url = f"https://{custom_domain}" if custom_domain else "Cloudflare Zero Trust (Permanent Domain)"
-        mobile_access_url = f"https://{custom_domain}/?token={token}" if custom_domain else f"(Configure custom_domain in state.json) Token: {token}"
-    else:
-        # Boot Cloudflare Quick Tunnel Fallback
-        print("\033[96m[*] Establishing Cloudflare Quick Tunnel...\033[0m", flush=True)
-        cloudflared_bin = "/usr/local/bin/cloudflared" if os.path.exists("/usr/local/bin/cloudflared") else os.path.expanduser("~/.local/bin/cloudflared")
-        if not os.path.exists(cloudflared_bin):
-            cloudflared_bin = "cloudflared"
+    quick_url = None
+    perm_url = f"https://{custom_domain}" if custom_domain else None
 
-        cmd = [
-            cloudflared_bin,
-            "tunnel",
-            "--no-autoupdate",
-            "--url",
-            f"http://127.0.0.1:{PORT}",
-        ]
-
-        try:
-            tunnel_proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-        except Exception as e:
-            print(f"\033[91m[✗] Failed to launch cloudflared: {e}\033[0m", file=sys.stderr)
-            cleanup_and_exit()
-
-        tunnel_url = None
-        url_pattern = re.compile(r"https://[-a-z0-9.]+\.trycloudflare\.com")
-
-        for line in tunnel_proc.stdout:
-            m = url_pattern.search(line)
-            if m:
-                tunnel_url = m.group(0)
-                break
-            if "error" in line.lower() and "failed" in line.lower():
-                print(f"\033[93m[cloudflared]\033[0m {line.strip()}", flush=True)
-
-        if not tunnel_url:
-            print("\033[91m[✗] Could not resolve Cloudflare Tunnel URL.\033[0m", file=sys.stderr)
-            cleanup_and_exit()
-
-        mobile_access_url = f"{tunnel_url}/?token={token}" if token else tunnel_url
-        st_data["tunnel_url"] = tunnel_url
-        st_data["mobile_access_url"] = mobile_access_url
-        try:
-            with open(STATE_PATH, "w", encoding="utf-8") as f:
-                json.dump(st_data, f, indent=2)
-        except Exception:
+    if mode == "local":
+        print("\033[93m[*] Local Mode: Public cloud tunnel disabled.\033[0m", flush=True)
+    elif mode == "quick":
+        print("\033[96m[*] Establishing Cloudflare Quick Tunnel (--quick mode)...\033[0m", flush=True)
+        tunnel_proc, quick_url = start_quick_tunnel(PORT)
+    elif mode == "dual":
+        print("\033[96m[*] Dual Mode: Activating Quick Tunnel alongside Permanent Service...\033[0m", flush=True)
+        tunnel_proc, quick_url = start_quick_tunnel(PORT)
+    elif mode == "permanent":
+        if not is_service_active:
+            print("\033[93m[!] Permanent service not active. Starting system service...\033[0m", flush=True)
+            subprocess.run(["systemctl", "start", "cloudflared"], check=False)
+            is_service_active = True
+    else:  # "auto"
+        if is_service_active:
             pass
+        else:
+            print("\033[96m[*] Establishing Cloudflare Quick Tunnel (Auto fallback)...\033[0m", flush=True)
+            tunnel_proc, quick_url = start_quick_tunnel(PORT)
 
-    # 4. Display Premium Terminal Dashboard Banner
+    # Update state.json with latest URLs
+    if quick_url:
+        st_data["quick_tunnel_url"] = quick_url
+        st_data["mobile_access_url"] = f"{quick_url}/?token={token}"
+    elif perm_url:
+        st_data["mobile_access_url"] = f"{perm_url}/?token={token}"
+    try:
+        with open(STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(st_data, f, indent=2)
+    except Exception:
+        pass
+
+    # 3. Display Premium Terminal Dashboard Banner
     print("\033[2J\033[H", end="")  # Clear screen and move cursor to home
     print("\033[1;36m" + "=" * 74 + "\033[0m")
     print("\033[1;37m                 ANTIGRAVITY REMOTE - CONTROL CENTER\033[0m")
     print("\033[1;36m" + "=" * 74 + "\033[0m")
-    print(f"  \033[1;32m[✓] Local Port  :\033[0m http://127.0.0.1:{PORT}")
-    print(f"  \033[1;32m[✓] Cloud Tunnel:\033[0m {tunnel_url}")
-    print(f"  \033[1;32m[✓] Secret Token:\033[0m {token}")
-    print("\033[1;36m" + "-" * 74 + "\033[0m")
-    print("  \033[1;33m👉 OPEN ON MOBILE (Direct Authorized Link):\033[0m")
-    print(f"     \033[1;4;37m{mobile_access_url}\033[0m")
+    print(f"  \033[1;32m[✓] Local Port     :\033[0m http://127.0.0.1:{PORT}")
+
+    if mode == "dual" or (perm_url and quick_url):
+        print(f"  \033[1;32m[✓] Permanent URL  :\033[0m {perm_url or 'Active (System Service)'}")
+        print(f"  \033[1;32m[✓] Quick Tunnel   :\033[0m {quick_url}")
+        print(f"  \033[1;32m[✓] Secret Token   :\033[0m {token}")
+        print("\033[1;36m" + "-" * 74 + "\033[0m")
+        if perm_url:
+            print("  \033[1;33m👉 PERMANENT LINK (Your Domain):\033[0m")
+            print(f"     \033[1;4;37m{perm_url}/?token={token}\033[0m\n")
+        print("  \033[1;33m👉 QUICK SHARE LINK (Temporary):\033[0m")
+        print(f"     \033[1;4;37m{quick_url}/?token={token}\033[0m")
+    elif mode == "quick" or (quick_url and not perm_url):
+        print(f"  \033[1;32m[✓] Cloud Tunnel   :\033[0m {quick_url} \033[90m(Quick Tunnel Mode)\033[0m")
+        print(f"  \033[1;32m[✓] Secret Token   :\033[0m {token}")
+        print("\033[1;36m" + "-" * 74 + "\033[0m")
+        print("  \033[1;33m👉 OPEN ON MOBILE (Direct Authorized Link):\033[0m")
+        print(f"     \033[1;4;37m{quick_url}/?token={token}\033[0m")
+    elif mode == "local":
+        print("  \033[1;33m[!] Mode           :\033[0m Localhost Only (No Public Tunnel)")
+        print(f"  \033[1;32m[✓] Secret Token   :\033[0m {token}")
+        print("\033[1;36m" + "-" * 74 + "\033[0m")
+        print("  \033[1;33m👉 OPEN LOCALLY:\033[0m")
+        print(f"     \033[1;4;37mhttp://127.0.0.1:{PORT}/?token={token}\033[0m")
+    else:
+        display_perm = perm_url or "Active (Cloudflare Zero Trust System Service)"
+        print(f"  \033[1;32m[✓] Cloud Tunnel   :\033[0m {display_perm}")
+        print(f"  \033[1;32m[✓] Secret Token   :\033[0m {token}")
+        print("\033[1;36m" + "-" * 74 + "\033[0m")
+        if perm_url:
+            print("  \033[1;33m👉 OPEN ON MOBILE (Permanent Custom Domain Link):\033[0m")
+            print(f"     \033[1;4;37m{perm_url}/?token={token}\033[0m")
+        else:
+            print("  \033[1;33m👉 CLOUDFLARE ZERO TRUST ACTIVE:\033[0m")
+            print("     Access via your configured Cloudflare hostname with secret token:")
+            print(f"     \033[1;37m?token={token}\033[0m")
+
     print("\033[1;36m" + "=" * 74 + "\033[0m")
-    print("  \033[90mKeep this terminal window open while you need remote access.\033[0m")
-    print("  \033[90mPress \033[1;37mCtrl+C\033[0;90m anytime to safely terminate server and tunnel.\033[0m")
+    print("  \033[90mFlags: \033[1;37m--quick\033[0;90m (force quick tunnel), \033[1;37m--dual\033[0;90m (both), \033[1;37m--local\033[0;90m (no tunnel)\033[0m")
+    print("  \033[90mPress \033[1;37mCtrl+C\033[0;90m anytime to cleanly exit.\033[0m")
     print("\033[1;36m" + "=" * 74 + "\033[0m")
     print("\033[1;35m[LIVE REQUEST STREAM]\033[0m\n", flush=True)
 
-    # 5. Keep main thread alive and monitor processes
+    # 4. Keep main thread alive and monitor processes
     try:
         while True:
             if tunnel_proc and tunnel_proc.poll() is not None:
-                print("\033[91m[!] Cloudflare Tunnel disconnected unexpectedly.\033[0m", flush=True)
+                print("\033[91m[!] Quick Tunnel process disconnected.\033[0m", flush=True)
                 break
             time.sleep(1)
     except KeyboardInterrupt:

@@ -82,7 +82,7 @@ class AntigravityRemoteApp(Gtk.Application):
         terminal.spawn_async(
             Vte.PtyFlags.DEFAULT,
             DIR,
-            [sys.executable, LAUNCHER],
+            [sys.executable, LAUNCHER] + sys.argv[1:],
             env_list,
             GLib.SpawnFlags.DEFAULT,
             None,
