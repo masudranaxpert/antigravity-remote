@@ -191,12 +191,18 @@ body {
 
 .header-actions {
   grid-area: actions;
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
   width: 100%;
   padding-top: 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+@media (min-width: 520px) {
+  .header-actions {
+    grid-template-columns: repeat(4, 1fr);
+  }
 }
 
 .host-pill {
@@ -204,7 +210,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 6px 10px;
   min-height: 38px;
   border-radius: var(--radius-sm);
   background-color: var(--surface-raised);
@@ -214,8 +220,8 @@ body {
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  flex: 1;
-  flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .app-pill {
@@ -233,8 +239,8 @@ body {
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  flex: 1;
-  flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box;
   transition: all 0.15s ease;
   user-select: none;
 }
@@ -315,8 +321,8 @@ body {
   font-family: inherit;
   outline: none;
   white-space: nowrap;
-  flex: 1;
-  flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .audio-pill:hover {
@@ -364,8 +370,8 @@ body {
   font-family: inherit;
   outline: none;
   white-space: nowrap;
-  flex: 1;
-  flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .sleep-pill:hover {
@@ -475,8 +481,10 @@ body {
 
   .host-pill,
   .app-pill,
-  .audio-pill {
+  .audio-pill,
+  .sleep-pill {
     flex: initial;
+    width: auto;
     min-height: 34px;
     padding: 5px 12px;
   }

@@ -533,6 +533,8 @@
         showToast('Switch dispatched. Host state refreshed.', 'ok');
       }
     }, 1500);
+  }
+
   // Trigger remote Antigravity IDE launch on host PC
   async function triggerLaunchIDE() {
     showToast('Launching Antigravity on host PC...', 'info');
