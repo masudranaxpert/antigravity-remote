@@ -22,7 +22,7 @@
 ## Prerequisites & Dependencies
 
 1. **Google Antigravity IDE** (Installed on host PC)
-2. **Antigravity Tools (`antigravity-tools` / AMGR)**: Required for initial multi-account login and token storage in `~/.antigravity_tools/accounts/`.
+2. **Antigravity Manager (`antigravity-tools` / AMGR)**: [lbjlaq/Antigravity-Manager](https://github.com/lbjlaq/Antigravity-Manager) (Required for initial multi-account login and token storage in `~/.antigravity_tools/accounts/`).
 3. **Linux Keyring Tools** (Linux only): `libsecret-tools` (`secret-tool`) for GNOME Keyring credential injection.
 4. **Cloudflared CLI** (Optional): For secure remote access outside your local Wi-Fi network.
 

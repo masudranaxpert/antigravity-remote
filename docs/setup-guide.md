@@ -20,6 +20,8 @@ sudo pacman -S python libsecret
 sudo dnf install python3 libsecret
 ```
 
+Additionally, install and configure [Antigravity-Manager (lbjlaq/Antigravity-Manager)](https://github.com/lbjlaq/Antigravity-Manager) to add and manage your Google accounts.
+
 ### 2. Install Cloudflared (Quick Tunnel)
 Download and install the official Cloudflare tunnel binary:
 
@@ -36,7 +38,7 @@ chmod +x ~/.local/bin/cloudflared
 
 ### 3. Clone and Initialize
 ```bash
-git clone https://github.com/<your-username>/antigravity-remote.git ~/apps/"Antigravity Remote"
+git clone https://github.com/masudranaxpert/antigravity-remote.git ~/apps/"Antigravity Remote"
 cd ~/apps/"Antigravity Remote"
 chmod +x run.sh launcher.py
 ```
@@ -59,13 +61,14 @@ Antigravity Remote runs natively on Windows using standard Python.
 
 ### 1. Prerequisites
 1. Install **Python 3.10+** from [python.org](https://www.python.org/) (ensure **"Add Python to PATH"** is checked during installation).
-2. Download **cloudflared.exe** from [Cloudflare Releases](https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe) and place it in your `PATH` (e.g., `C:\Windows\System32` or your user folder).
+2. Install [Antigravity-Manager](https://github.com/lbjlaq/Antigravity-Manager) on Windows to register multi-account profiles.
+3. Download **cloudflared.exe** from [Cloudflare Releases](https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe) and place it in your `PATH` (e.g., `C:\Windows\System32` or your user folder).
 
 ### 2. Clone Repository
 Open PowerShell or Windows Terminal:
 
 ```powershell
-git clone https://github.com/<your-username>/antigravity-remote.git "$HOME\Antigravity-Remote"
+git clone https://github.com/masudranaxpert/antigravity-remote.git "$HOME\Antigravity-Remote"
 cd "$HOME\Antigravity-Remote"
 ```
 
