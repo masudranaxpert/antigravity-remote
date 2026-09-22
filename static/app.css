@@ -663,78 +663,7 @@ body {
   flex-shrink: 0;
 }
 
-.gateway-footer {
-  border-top: 1px solid var(--border);
-  background-color: var(--surface-subtle);
-  padding: 10px 20px;
-}
 
-.drawer-toggle-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: none;
-  border: none;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  padding: 4px 0;
-  transition: color 0.15s ease;
-}
-
-.drawer-toggle-btn:hover {
-  color: var(--text-secondary);
-}
-
-.remote-drawer {
-  display: none;
-  margin-top: 10px;
-  padding-top: 10px;
-}
-
-.remote-drawer.open {
-  display: block;
-}
-
-.drawer-input-row {
-  display: flex;
-  gap: 8px;
-}
-
-.drawer-input-row input {
-  flex: 1;
-  min-height: 38px;
-  background-color: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0 12px;
-  font-size: 12.5px;
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  outline: none;
-}
-
-.drawer-input-row input:focus {
-  border-color: var(--gemini-accent);
-}
-
-.drawer-save-btn {
-  min-height: 38px;
-  padding: 0 16px;
-  background-color: var(--surface-raised);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-
-.drawer-save-btn:hover {
-  background-color: var(--surface-hover);
-}
 
 /* Unnested Sleek Quota Telemetry (No card nesting bloat) */
 .quota-list {

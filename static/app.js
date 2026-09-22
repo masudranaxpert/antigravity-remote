@@ -39,6 +39,18 @@
     return '#';
   }
 
+  // 12-Hour Time Formatter (hh:mm:ss AM/PM)
+  function format12HourTime(date) {
+    let hours = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    const strHours = String(hours).padStart(2, '0');
+    return `${strHours}:${minutes}:${seconds} ${ampm}`;
+  }
+
   // Top Floating Toast Notification HUD
   function showToast(msg, type = 'ok') {
     const toast = document.getElementById('toast');
@@ -221,15 +233,14 @@
     const pcDot = document.getElementById('pc-dot');
     const pcStatusText = document.getElementById('pc-status-text');
     const remoteActionWrap = document.getElementById('remote-action-wrap');
-    const remoteInput = document.getElementById('remote-input');
     const gatewayHeading = document.getElementById('gateway-device-name');
     const heroWrap = document.getElementById('hero-deck-wrap');
     const grid = document.getElementById('accounts-grid');
     const countBadge = document.getElementById('accounts-count');
 
-    // 1. Host Telemetry
+    // 1. Host Telemetry (Guaranteed 12-Hour AM/PM format)
     const now = new Date();
-    syncTime.textContent = 'Synced ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    syncTime.textContent = 'Synced ' + format12HourTime(now);
 
     // Host PC Connection (Server is responding on host machine)
     if (pcDot && pcStatusText) {
@@ -296,7 +307,6 @@
     gatewayHeading.textContent = `${deviceName} Remote Session`;
 
     if (data.remote_url) {
-      remoteInput.value = data.remote_url;
       remoteActionWrap.innerHTML = `
         <div class="remote-btn-group">
           <a href="${sanitizeUrl(data.remote_url)}" target="_blank" rel="noopener noreferrer" class="remote-launch-btn">
@@ -598,34 +608,6 @@
           }
         } else {
           showToast('Failed to toggle host audio mute', 'err');
-        }
-      });
-    }
-
-    const toggleDrawerBtn = document.getElementById('toggle-drawer-btn');
-    const drawer = document.getElementById('remote-drawer');
-    if (toggleDrawerBtn && drawer) {
-      toggleDrawerBtn.addEventListener('click', () => {
-        drawer.classList.toggle('open');
-      });
-    }
-
-    const saveRemoteBtn = document.getElementById('save-remote-btn');
-    if (saveRemoteBtn) {
-      saveRemoteBtn.addEventListener('click', async () => {
-        const input = document.getElementById('remote-input');
-        const url = input.value.trim();
-        const res = await apiRequest('/api/remote-url', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url })
-        });
-        if (res.success) {
-          showToast('Remote link saved', 'ok');
-          drawer.classList.remove('open');
-          loadStateData(false);
-        } else {
-          showToast('Failed to save remote link', 'err');
         }
       });
     }

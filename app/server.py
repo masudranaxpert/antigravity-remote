@@ -184,7 +184,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
             accounts, current_email, current_id = load_accounts()
             remote_info = get_official_remote_info(current_email)
-            remote_url = st.get("remote_url") or remote_info.get("url", "")
+            remote_url = remote_info.get("url", "")
 
             return self.send_json({
                 "accounts": accounts,
@@ -236,15 +236,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "antigravity_running": is_antigravity_running(),
             })
 
-        if path == "/api/remote-url":
-            url = body.get("url", "").strip()
-            if url:
-                st["remote_url"] = url
-            else:
-                st.pop("remote_url", None)
-            save_state(st)
-            return self.send_json({"success": True})
-
         if path == "/api/audio/mute":
             toggle_host_audio_mute()
             return self.send_json({
@@ -257,7 +248,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         """Format and log incoming HTTP requests to terminal stdout."""
         import datetime
-        now = datetime.datetime.now().strftime("%H:%M:%S")
+        now = datetime.datetime.now().strftime("%I:%M:%S %p")
         req = args[0] if len(args) > 0 else ""
         status = args[1] if len(args) > 1 else ""
         if str(status).startswith("2"):
