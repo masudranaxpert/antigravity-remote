@@ -231,14 +231,31 @@
     const now = new Date();
     syncTime.textContent = 'Synced ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-    if (data.antigravity_running) {
+    // Host PC Connection (Server is responding on host machine)
+    if (pcDot && pcStatusText) {
       pcDot.className = 'status-dot active';
-      pcStatusText.textContent = 'PC Active';
+      pcStatusText.textContent = 'PC Online';
       pcStatusText.style.color = 'var(--text-primary)';
-    } else {
-      pcDot.className = 'status-dot stopped';
-      pcStatusText.textContent = 'PC Stopped';
-      pcStatusText.style.color = 'var(--text-secondary)';
+    }
+
+    // Antigravity Desktop IDE Process Telemetry
+    const appDot = document.getElementById('app-dot');
+    const appStatusText = document.getElementById('app-status-text');
+    const appPill = document.getElementById('app-status-pill');
+    if (appDot && appStatusText && appPill) {
+      if (data.antigravity_running) {
+        appDot.className = 'status-dot active';
+        appStatusText.textContent = 'IDE Active';
+        appPill.className = 'app-pill active';
+        appPill.title = 'Antigravity desktop IDE is open and active on PC';
+        appPill.onclick = null;
+      } else {
+        appDot.className = 'status-dot stopped';
+        appStatusText.textContent = 'IDE Closed';
+        appPill.className = 'app-pill stopped';
+        appPill.title = 'Antigravity IDE is closed. Tap to launch on host PC.';
+        appPill.onclick = () => triggerLaunchIDE();
+      }
     }
 
     // Audio Telemetry
@@ -330,17 +347,28 @@
               <div class="hero-badge-group">
                 <span class="badge-live">
                   <span class="badge-live-dot"></span>
-                  HOST ACTIVE
+                  ACTIVE ACCOUNT
                 </span>
                 <span class="badge-tier">PRO PLAN</span>
               </div>
               <div class="hero-process-status">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-                  <line x1="8" y1="21" x2="16" y2="21"></line>
-                  <line x1="12" y1="17" x2="12" y2="21"></line>
-                </svg>
-                <span>${data.antigravity_running ? 'Antigravity IDE' : 'Stopped'}</span>
+                ${data.antigravity_running ? `
+                  <span class="process-badge running" title="Antigravity Electron process is active on PC">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                      <line x1="8" y1="21" x2="16" y2="21"></line>
+                      <line x1="12" y1="17" x2="12" y2="21"></line>
+                    </svg>
+                    <span>IDE Active</span>
+                  </span>
+                ` : `
+                  <button type="button" class="launch-ide-btn" id="hero-launch-btn" title="Launch Antigravity Desktop IDE on Host PC">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                    <span>Launch IDE</span>
+                  </button>
+                `}
               </div>
             </div>
             <div class="hero-account-info">
@@ -351,6 +379,11 @@
           ${renderDualQuotas(activeAccount)}
         </div>
       `;
+
+      const heroLaunchBtn = document.getElementById('hero-launch-btn');
+      if (heroLaunchBtn) {
+        heroLaunchBtn.addEventListener('click', () => triggerLaunchIDE());
+      }
     } else {
       heroWrap.innerHTML = '';
     }
@@ -474,6 +507,20 @@
         showToast('Switch dispatched. Host state refreshed.', 'ok');
       }
     }, 1500);
+  // Trigger remote Antigravity IDE launch on host PC
+  async function triggerLaunchIDE() {
+    showToast('Launching Antigravity on host PC...', 'info');
+    const res = await apiRequest('/api/launch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_ide: 'classic' })
+    });
+    if (res && res.success) {
+      showToast('Antigravity IDE started on host machine!', 'ok');
+      setTimeout(() => loadStateData(false), 1500);
+    } else {
+      showToast('Failed to launch Antigravity on host', 'err');
+    }
   }
 
   // Data Loading Coordinator
@@ -483,6 +530,16 @@
 
     const data = await apiRequest('/api/state');
     if (refreshBtn) refreshBtn.classList.remove('spinning');
+
+    if (!data) {
+      const pcDot = document.getElementById('pc-dot');
+      const pcStatusText = document.getElementById('pc-status-text');
+      if (pcDot && pcStatusText) {
+        pcDot.className = 'status-dot stopped';
+        pcStatusText.textContent = 'PC Offline';
+      }
+      return;
+    }
 
     if (data.need_login) {
       window.location.reload();

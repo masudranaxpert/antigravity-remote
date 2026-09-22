@@ -209,13 +209,90 @@ body {
   border-radius: var(--radius-sm);
   background-color: var(--surface-raised);
   border: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 500;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   flex: 1;
   flex-shrink: 0;
+}
+
+.app-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 10px;
+  min-height: 38px;
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex: 1;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.app-pill.active {
+  border-color: rgba(16, 185, 129, 0.3);
+  color: var(--text-primary);
+}
+
+.app-pill.stopped {
+  border-color: rgba(148, 163, 184, 0.2);
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.app-pill.stopped:hover {
+  border-color: var(--gemini-accent);
+  color: var(--gemini-accent);
+  background-color: var(--surface-subtle);
+}
+
+.launch-ide-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--gemini-bg);
+  border: 1px solid var(--gemini-border);
+  color: var(--gemini-accent);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.launch-ide-btn:hover {
+  background-color: rgba(37, 99, 235, 0.25);
+  border-color: var(--gemini-accent);
+  transform: translateY(-1px);
+}
+
+.launch-ide-btn:active {
+  transform: translateY(0);
+}
+
+.process-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.process-badge.running {
+  color: var(--emerald);
 }
 
 .audio-pill {
@@ -337,6 +414,7 @@ body {
   }
 
   .host-pill,
+  .app-pill,
   .audio-pill {
     flex: initial;
     min-height: 34px;

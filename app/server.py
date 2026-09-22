@@ -40,6 +40,10 @@ def load_state():
         save_state(init_state)
         return init_state
     try:
+        os.chmod(STATE_PATH, 0o600)
+    except OSError:
+        pass
+    try:
         with open(STATE_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
             if not data.get("mobile_token"):
@@ -60,6 +64,10 @@ def save_state(state):
     except OSError:
         pass
     os.replace(tmp, STATE_PATH)
+    try:
+        os.chmod(STATE_PATH, 0o600)
+    except OSError:
+        pass
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
