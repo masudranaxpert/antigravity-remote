@@ -477,6 +477,7 @@ def run_checks():
         # M. Login Verification Endpoint (/api/auth/verify) & 24h Set-Cookie Check
         orig_st = load_state()
         orig_totp = bool(orig_st.get("totp_enabled", False))
+        orig_totp_secret = orig_st.get("totp_secret", "")
         if orig_totp:
             orig_st["totp_enabled"] = False
             save_state(orig_st)
@@ -550,8 +551,10 @@ def run_checks():
                 otp_cookie = resp.headers.get("Set-Cookie", "")
                 assert "Max-Age=86400" in otp_cookie
         finally:
-            demo_st["totp_enabled"] = orig_totp
-            save_state(demo_st)
+            restore_st = load_state()
+            restore_st["totp_enabled"] = orig_totp
+            restore_st["totp_secret"] = orig_totp_secret
+            save_state(restore_st)
 
         print("PASS: 24-hour cookie lifetime and Authenticator App 2FA (TOTP) auth flow verified")
 
