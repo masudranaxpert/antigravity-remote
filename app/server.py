@@ -116,7 +116,17 @@ def save_state(state):
 
 
 def compute_client_fingerprint(headers) -> str:
-    """Compute normalized SHA-256 fingerprint hash for device binding."""
+    """Compute normalized SHA-256 fingerprint hash for device binding.
+
+    Uses User-Agent which is reliably present and identical across standard
+    HTTP GET/POST requests and RFC 6455 WebSocket upgrade handshakes.
+    """
+    ua = headers.get("User-Agent", "").strip()
+    return hashlib.sha256(ua.encode("utf-8")).hexdigest()[:16]
+
+
+def compute_legacy_fingerprint(headers) -> str:
+    """Compute legacy fingerprint for seamless migration of active sessions."""
     ua = headers.get("User-Agent", "").strip()
     lang = headers.get("Accept-Language", "").strip().split(",")[0]
     platform = headers.get("Sec-Ch-Ua-Platform", "").strip()
@@ -209,6 +219,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 if "mrt" in cookie:
                     cookie_val = cookie["mrt"].value
                     valid, reason = verify_session_token(cookie_val, master_token, current_fp)
+                    if not valid and reason == "device_fingerprint_mismatch":
+                        # Attempt transparent migration from legacy multi-header fingerprint
+                        legacy_fp = compute_legacy_fingerprint(self.headers)
+                        if legacy_fp != current_fp:
+                            valid_leg, reason_leg = verify_session_token(cookie_val, master_token, legacy_fp)
+                            if valid_leg:
+                                upgraded_token = generate_session_token(master_token, current_fp)
+                                return True, st, upgraded_token, "cookie_migrated"
                     if valid:
                         return True, st, None, f"cookie_{reason}"
                     else:

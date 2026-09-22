@@ -202,7 +202,12 @@
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const cols = term ? term.cols : 80;
     const rows = term ? term.rows : 24;
-    const wsUrl = `${protocol}//${location.host}/api/terminal/ws?cols=${cols}&rows=${rows}`;
+    const urlParams = new URLSearchParams(window.location.search);
+    const tokenParam = urlParams.get('token');
+    let wsUrl = `${protocol}//${location.host}/api/terminal/ws?cols=${cols}&rows=${rows}`;
+    if (tokenParam) {
+      wsUrl += `&token=${encodeURIComponent(tokenParam)}`;
+    }
 
     try {
       if (ws) {

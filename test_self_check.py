@@ -18,6 +18,7 @@ from app.detector import (
 )
 from app.server import (
     SESSION_MAX_AGE,
+    compute_client_fingerprint,
     generate_session_token,
     load_state,
     save_state,
@@ -288,6 +289,29 @@ def run_checks():
 
         ws_sock.close()
         print("PASS: Live WebSocket terminal interactive session & heartbeat keep-alive verified")
+
+        # Test WebSocket authentication via session cookie without query token (pure cookie auth)
+        ws_sock_cookie = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        ws_sock_cookie.connect(("127.0.0.1", test_port))
+        test_ws_ua = "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 Chrome/153.0.0.0 Mobile"
+        fresh_test_fp = compute_client_fingerprint({"User-Agent": test_ws_ua})
+        fresh_ws_cookie = generate_session_token(token, fresh_test_fp)
+        ws_cookie_req = (
+            f"GET /api/terminal/ws?cols=80&rows=24 HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{test_port}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"User-Agent: {test_ws_ua}\r\n"
+            f"Cookie: mrt={fresh_ws_cookie}\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "\r\n"
+        )
+        ws_sock_cookie.sendall(ws_cookie_req.encode("utf-8"))
+        ws_cookie_hdr = ws_sock_cookie.recv(1024).decode("utf-8")
+        assert "101 Switching Protocols" in ws_cookie_hdr, f"Expected 101 for cookie auth, got: {ws_cookie_hdr}"
+        ws_sock_cookie.close()
+        print("PASS: WebSocket session cookie authentication (zero query token) verified")
 
         # I. Invalid token rejection check
         try:
