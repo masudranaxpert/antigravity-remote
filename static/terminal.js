@@ -171,11 +171,11 @@
       }, 50);
     }
 
-    // Intercept physical Escape key so browser does not swallow it and sends VT100 double escape sequence
+    // Intercept physical Escape key so browser does not swallow it
     term.attachCustomKeyEventHandler((e) => {
       if (e.key === 'Escape') {
         if (e.type === 'keydown') {
-          sendInput('\x1b\x1b');
+          sendInput('\x1b');
         }
         return false;
       }
@@ -290,13 +290,14 @@
     let startX = 0;
     let startY = 0;
     let isDrag = false;
+    let activeEl = null;
 
     container.addEventListener('pointerdown', (e) => {
-      const el = e.target.closest(selector);
-      if (!el) return;
+      // Always reset drag state on any new touch, even outside a button
+      isDrag = false;
       startX = e.clientX;
       startY = e.clientY;
-      isDrag = false;
+      activeEl = e.target.closest(selector);
     });
 
     container.addEventListener('pointermove', (e) => {
@@ -306,11 +307,18 @@
     });
 
     container.addEventListener('pointerup', (e) => {
-      if (isDrag) return;
+      if (isDrag || !activeEl) return;
       const el = e.target.closest(selector);
-      if (!el) return;
+      // Require pointerup on same element as pointerdown to avoid swipe-through
+      if (!el || el !== activeEl) return;
       e.preventDefault();
       onTrigger(el);
+      activeEl = null;
+    });
+
+    container.addEventListener('pointercancel', () => {
+      isDrag = false;
+      activeEl = null;
     });
 
     // Suppress synthetic click to prevent duplicate trigger
@@ -341,8 +349,12 @@
 
       switch (key) {
         case 'escape':
-          // Send double escape (\x1b\x1b) to satisfy TUI parsers without timeout buffering delay
-          sendInput('\x1b\x1b');
+          // Single ESC; do NOT call term.focus() here — xterm focus events
+          // arrive via PTY and can interrupt the TUI's 20ms escape timeout.
+          sendInput('\x1b');
+          return;
+        case 'enter':
+          sendInput('\r');
           break;
         case 'tab':
           sendInput('\t');
