@@ -164,3 +164,16 @@ gio set ~/Desktop/"Antigravity Remote.desktop" metadata::trusted true
 ```
 
 Double-clicking the desktop icon automatically starts the native dark terminal window, reads your `state.json` configuration, and displays the authorized connection URL.
+
+---
+
+## 💻 Mobile Web Terminal Access
+
+Antigravity Remote includes a built-in, low-latency, full-duplex interactive web terminal:
+
+- **Web Route**: `https://<your-domain>/terminal?token=<your-token>`
+- **Dashboard Access**: Tap the **Terminal** button in the header of the main dashboard.
+- **PTY Engine**: Runs your native Linux shell (`/bin/bash`) via standard library pseudo-terminals (`pty.openpty`) and RFC 6455 WebSockets.
+- **Mobile Touch Keyboard Bar**: Pinned above your phone's keyboard with `ESC`, `TAB`, `CTRL` (sticky toggle), `Ctrl+C`, `Ctrl+D`, `Ctrl+L`, arrows (`↑`, `↓`, `←`, `→`), and quick symbols (`|`, `/`, `~`, `-`).
+- **Quick Command Chips**: One-tap execution of common commands (`git status`, `git pull`, `htop`, `df -h`, `free -h`, `uptime`, `ls -la`).
+- **Zero External CDN Dependencies**: Uses locally vendored `xterm.js` for instant, offline-ready terminal rendering.

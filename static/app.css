@@ -428,12 +428,50 @@ body {
   background-color: var(--text-tertiary);
 }
 
-.icon-action-btn {
+.header-controls {
   grid-area: refresh;
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
   justify-self: end;
+}
+
+.terminal-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 11px;
+  border-radius: var(--radius-md);
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.15s ease;
+  user-select: none;
+  font-family: inherit;
+}
+
+.terminal-nav-btn svg {
+  color: #38bdf8;
+}
+
+.terminal-nav-btn:hover {
+  background-color: var(--surface-subtle);
+  border-color: var(--border-strong);
+  color: #38bdf8;
+}
+
+.terminal-nav-btn:active {
+  transform: scale(0.96);
+}
+
+.icon-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 38px;
   height: 38px;
   background-color: var(--surface-raised);
@@ -487,6 +525,12 @@ body {
     width: auto;
     min-height: 34px;
     padding: 5px 12px;
+  }
+
+  .terminal-nav-btn {
+    height: 34px;
+    padding: 0 10px;
+    font-size: 11.5px;
   }
 
   .icon-action-btn {

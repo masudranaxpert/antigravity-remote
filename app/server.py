@@ -26,6 +26,7 @@ from app.switcher import (
     set_sleep_inhibit,
     toggle_host_audio_mute,
 )
+from app.terminal import TerminalSession, compute_accept_key
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -189,6 +190,51 @@ class DashboardHandler(BaseHTTPRequestHandler):
             cookie_to_set = st.get("mobile_token") if from_query else None
             html_file = os.path.join(TEMPLATES_DIR, "index.html")
             return self.send_file(html_file, "text/html; charset=utf-8", set_cookie_token=cookie_to_set)
+
+        if path == "/terminal":
+            authed, st, from_query = self.is_authenticated()
+            if not authed:
+                auth_file = os.path.join(TEMPLATES_DIR, "auth.html")
+                return self.send_file(auth_file, "text/html; charset=utf-8")
+
+            cookie_to_set = st.get("mobile_token") if from_query else None
+            html_file = os.path.join(TEMPLATES_DIR, "terminal.html")
+            return self.send_file(html_file, "text/html; charset=utf-8", set_cookie_token=cookie_to_set)
+
+        if path == "/api/terminal/ws":
+            authed, st, _ = self.is_authenticated()
+            if not authed:
+                return self.send_json({"error": "unauthorized"}, 401)
+
+            ws_key = self.headers.get("Sec-WebSocket-Key", "").strip()
+            if not ws_key:
+                return self.send_json({"error": "bad_websocket_request"}, 400)
+
+            accept_key = compute_accept_key(ws_key)
+            response = (
+                "HTTP/1.1 101 Switching Protocols\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                f"Sec-WebSocket-Accept: {accept_key}\r\n"
+                "\r\n"
+            )
+            try:
+                self.wfile.write(response.encode("utf-8"))
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
+
+            query = parse_qs(urlparse(self.path).query)
+            try:
+                rows = int(query.get("rows", [24])[0])
+                cols = int(query.get("cols", [80])[0])
+            except Exception:
+                rows, cols = 24, 80
+
+            session = TerminalSession(self.connection, rows=rows, cols=cols)
+            self.close_connection = True
+            session.start()
+            return
 
         if path == "/api/state":
             authed, st, _ = self.is_authenticated()

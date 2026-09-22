@@ -18,6 +18,7 @@ from app.detector import (
 )
 from app.server import load_state
 from app.switcher import get_sleep_inhibit_status, set_sleep_inhibit
+from app.terminal import compute_accept_key, encode_ws_frame, resize_pty, spawn_shell_pty
 
 
 def run_checks():
@@ -66,7 +67,27 @@ def run_checks():
     assert get_sleep_inhibit_status() is False, "Expected sleep inhibitor to report inactive"
     print("PASS: Host sleep prevention inhibitor lifecycle verified")
 
-    # 6. HTTP Endpoints & Auth FOUC-prevention check
+    # 6. Terminal PTY Engine and RFC 6455 verification
+    accept_val = compute_accept_key("dGhlIHNhbXBsZSBub25jZQ==")
+    assert accept_val == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", f"Invalid accept key: {accept_val}"
+    frame = encode_ws_frame(b"ping-test", 1)
+    assert frame[0] == 0x81 and frame[1] == 9 and frame[2:] == b"ping-test", "Invalid WebSocket frame encoding"
+
+    master_fd, shell_pid = spawn_shell_pty(rows=24, cols=80)
+    assert master_fd > 0 and shell_pid > 0, "Failed to spawn shell PTY"
+    import time
+    time.sleep(0.1)
+    os.write(master_fd, b"echo __TERM_SELF_CHECK_OK__\n")
+    time.sleep(0.1)
+    pty_out = os.read(master_fd, 1024)
+    assert b"__TERM_SELF_CHECK_OK__" in pty_out, f"PTY execution mismatch: {pty_out}"
+    resize_pty(master_fd, 30, 100)
+    os.kill(shell_pid, 9)
+    os.waitpid(shell_pid, 0)
+    os.close(master_fd)
+    print("PASS: Terminal PTY shell lifecycle and RFC 6455 frame engine verified")
+
+    # 7. HTTP Endpoints & Auth FOUC-prevention check
     import threading
     from http.server import ThreadingHTTPServer
     from app.server import DashboardHandler
@@ -160,7 +181,62 @@ def run_checks():
             assert s_restore["prevent_sleep"] != toggled_sleep, "Sleep toggle did not flip back"
         print("PASS: /api/sleep/toggle endpoint successfully toggles keep-awake state")
 
-        # G. Invalid token rejection check
+        # G. Terminal page authentication gate check (Zero FOUC)
+        req_term_unauth = urllib.request.Request(f"http://127.0.0.1:{test_port}/terminal")
+        with urllib.request.urlopen(req_term_unauth, timeout=3) as resp:
+            t_body = resp.read().decode("utf-8")
+            assert "Unlock Antigravity Remote" in t_body or "auth-token-input" in t_body, "Expected auth page for unauth /terminal"
+            assert "terminal-container" not in t_body, "Terminal markup leaked into unauthenticated response"
+
+        req_term_auth = urllib.request.Request(f"http://127.0.0.1:{test_port}/terminal?token={token}")
+        with urllib.request.urlopen(req_term_auth, timeout=3) as resp:
+            t_body_auth = resp.read().decode("utf-8")
+            assert "terminal-container" in t_body_auth, "Expected terminal template for authenticated request"
+            assert "xterm.js" in t_body_auth, "Expected xterm script tags in terminal template"
+        print("PASS: /terminal endpoint securely gated by authentication (Zero FOUC)")
+
+        # H. Live WebSocket terminal interactive session check
+        import socket
+        ws_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        ws_sock.connect(("127.0.0.1", test_port))
+        ws_req = (
+            f"GET /api/terminal/ws?token={token}&cols=80&rows=24 HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{test_port}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "\r\n"
+        )
+        ws_sock.sendall(ws_req.encode("utf-8"))
+        resp_hdr = ws_sock.recv(1024).decode("utf-8")
+        assert "101 Switching Protocols" in resp_hdr, f"Expected 101, got {resp_hdr}"
+        assert "Sec-WebSocket-Accept" in resp_hdr, "Missing accept header in WS response"
+
+        # Send masked command 'echo WS_LIVE_OK\n'
+        cmd_bytes = b"echo WS_LIVE_OK\n"
+        mask = b"\x11\x22\x33\x44"
+        masked_payload = bytes(b ^ mask[i % 4] for i, b in enumerate(cmd_bytes))
+        ws_frame = bytearray([0x81, 0x80 | len(cmd_bytes)]) + mask + masked_payload
+        ws_sock.sendall(ws_frame)
+
+        # Read response frames from server
+        time.sleep(0.15)
+        ws_sock.settimeout(2.0)
+        accumulated = b""
+        for _ in range(5):
+            try:
+                raw_in = ws_sock.recv(2048)
+                accumulated += raw_in
+                if b"WS_LIVE_OK" in accumulated:
+                    break
+            except Exception:
+                break
+        assert b"WS_LIVE_OK" in accumulated, f"Expected WS_LIVE_OK in PTY output, got: {accumulated}"
+        ws_sock.close()
+        print("PASS: Live WebSocket terminal interactive session verified")
+
+        # I. Invalid token rejection check
         try:
             bad_req = urllib.request.Request(f"http://127.0.0.1:{test_port}/api/state", headers={"Cookie": "mrt=invalid_token_12345"})
             urllib.request.urlopen(bad_req, timeout=3)

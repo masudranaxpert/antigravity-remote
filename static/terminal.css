@@ -1,0 +1,362 @@
+/**
+ * Antigravity Remote - Mobile Terminal Stylesheet
+ * Studio Dark Theme & Touch-Optimized Layout
+ */
+
+:root {
+  --bg: #0d0f12;
+  --surface: #14171e;
+  --surface-raised: #1a1f28;
+  --surface-hover: #222834;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --text-primary: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --text-tertiary: #6b7280;
+  --accent: #38bdf8;
+  --accent-bg: rgba(56, 189, 248, 0.12);
+  --accent-border: rgba(56, 189, 248, 0.35);
+  --emerald: #10b981;
+  --emerald-bg: rgba(16, 185, 129, 0.14);
+  --amber: #f59e0b;
+  --rose: #f43f5e;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background-color: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+
+/* Base Scaffold Layout */
+.terminal-scaffold {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background-color: var(--bg);
+}
+
+/* Top Studio Header */
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 12px;
+  background-color: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 20;
+}
+
+.header-left, .header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-center {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.session-label {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--text-tertiary);
+  transition: background-color 0.2s ease;
+}
+
+.status-dot.active {
+  background-color: var(--emerald);
+  box-shadow: 0 0 0 3px var(--emerald-bg);
+}
+
+.status-dot.disconnected {
+  background-color: var(--rose);
+}
+
+/* Navigation Back Button */
+.nav-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.nav-back-btn:hover {
+  background-color: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+/* Tool Action Buttons in Header */
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.tool-btn:hover {
+  background-color: var(--surface-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.tool-btn:active {
+  transform: scale(0.96);
+}
+
+/* Quick Commands Bar */
+.quick-commands-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background-color: rgba(20, 23, 30, 0.6);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.quick-commands-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.quick-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.12s ease;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.quick-chip:hover {
+  background-color: var(--surface-hover);
+  border-color: var(--accent-border);
+}
+
+.quick-chip:active {
+  background-color: var(--accent-bg);
+  transform: scale(0.96);
+}
+
+/* Terminal Canvas Container */
+.terminal-main {
+  flex: 1;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+  background-color: var(--bg);
+}
+
+.terminal-canvas-wrap {
+  width: 100%;
+  height: 100%;
+  padding: 8px 6px 4px 8px;
+}
+
+/* XTerm Container Theme Alignment */
+.terminal-canvas-wrap .xterm {
+  height: 100%;
+  padding: 0;
+}
+
+.terminal-canvas-wrap .xterm-viewport {
+  background-color: var(--bg) !important;
+}
+
+/* Mobile Virtual Accessory Touch Bar */
+.accessory-touch-bar {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 6px;
+  background-color: var(--surface);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 20;
+}
+
+.touch-bar-scroll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  overflow-x: auto;
+  padding: 2px 2px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.touch-bar-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.acc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+  transition: background-color 0.1s ease, border-color 0.1s ease, transform 0.08s ease;
+  flex-shrink: 0;
+}
+
+.acc-btn:active {
+  background-color: var(--surface-hover);
+  border-color: var(--border-strong);
+  transform: scale(0.94);
+}
+
+.acc-btn.special {
+  color: var(--accent);
+}
+
+.acc-btn.action {
+  color: var(--amber);
+}
+
+.acc-btn.arrow {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.acc-btn.symbol {
+  color: var(--text-secondary);
+}
+
+.acc-btn.toggle.active {
+  background-color: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Floating Toast Notifications */
+#toast {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-60px);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 100;
+  pointer-events: none;
+  max-width: 90vw;
+}
+
+#toast.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  visibility: visible;
+}
+
+#toast.ok {
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+#toast.ok #toast-icon {
+  color: var(--emerald);
+}
+
+#toast.err {
+  border-color: rgba(244, 63, 94, 0.4);
+}
+
+#toast.err #toast-icon {
+  color: var(--rose);
+}
+
+#toast.info {
+  border-color: var(--accent-border);
+}
+
+#toast.info #toast-icon {
+  color: var(--accent);
+}

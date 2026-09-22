@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
+  <title>Antigravity Remote - Web Terminal</title>
+  <link rel="icon" type="image/png" href="/static/icon.png">
+  <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
+  <link rel="stylesheet" href="/static/terminal.css">
+</head>
+<body>
+  <!-- Top Floating Notification Toast -->
+  <aside id="toast" role="alert" aria-live="assertive">
+    <div id="toast-icon" aria-hidden="true"></div>
+    <span id="toast-msg"></span>
+  </aside>
+
+  <div class="terminal-scaffold">
+    <!-- Top Terminal Studio Header -->
+    <header class="terminal-header">
+      <div class="header-left">
+        <a href="/" class="nav-back-btn" title="Back to Account Switcher Dashboard" aria-label="Back to Dashboard">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+          <span>Dashboard</span>
+        </a>
+      </div>
+
+      <div class="header-center">
+        <span class="status-dot active" id="term-status-dot" title="Session Connected"></span>
+        <span class="session-label" id="session-label">bash &bull; remote</span>
+      </div>
+
+      <div class="header-right">
+        <button type="button" class="tool-btn" id="font-decrease-btn" title="Decrease Font Size" aria-label="Decrease Font Size">A-</button>
+        <button type="button" class="tool-btn" id="font-increase-btn" title="Increase Font Size" aria-label="Increase Font Size">A+</button>
+        <button type="button" class="tool-btn" id="reconnect-btn" title="Reconnect Terminal" aria-label="Reconnect Terminal">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Quick Commands Bar (Fast Mobile Shortcuts) -->
+    <div class="quick-commands-bar" id="quick-commands-bar" aria-label="Quick Command Shortcuts">
+      <button type="button" class="quick-chip" data-cmd="git status&#10;">git status</button>
+      <button type="button" class="quick-chip" data-cmd="git pull&#10;">git pull</button>
+      <button type="button" class="quick-chip" data-cmd="htop&#10;">htop</button>
+      <button type="button" class="quick-chip" data-cmd="df -h&#10;">df -h</button>
+      <button type="button" class="quick-chip" data-cmd="free -h&#10;">free -h</button>
+      <button type="button" class="quick-chip" data-cmd="ls -la&#10;">ls -la</button>
+      <button type="button" class="quick-chip" data-cmd="uptime&#10;">uptime</button>
+      <button type="button" class="quick-chip" data-cmd="clear&#10;">clear</button>
+    </div>
+
+    <!-- Active Terminal Canvas Mount Area -->
+    <main class="terminal-main" id="terminal-main">
+      <div id="terminal-container" class="terminal-canvas-wrap"></div>
+    </main>
+
+    <!-- Mobile Virtual Keyboard Accessory Touch Bar -->
+    <nav class="accessory-touch-bar" id="accessory-bar" aria-label="Terminal Mobile Keys">
+      <div class="touch-bar-scroll">
+        <button type="button" class="acc-btn special" data-key="escape" title="Escape">ESC</button>
+        <button type="button" class="acc-btn special" data-key="tab" title="Tab (Auto-complete)">TAB</button>
+        <button type="button" class="acc-btn toggle" id="ctrl-toggle-btn" title="Toggle Sticky Ctrl">CTRL</button>
+        <button type="button" class="acc-btn action" data-key="ctrl-c" title="Interrupt (Ctrl+C)">^C</button>
+        <button type="button" class="acc-btn action" data-key="ctrl-d" title="EOF / Exit (Ctrl+D)">^D</button>
+        <button type="button" class="acc-btn action" data-key="ctrl-l" title="Clear Screen (Ctrl+L)">^L</button>
+        <button type="button" class="acc-btn arrow" data-key="arrow-up" title="Previous Command (Up)">&uarr;</button>
+        <button type="button" class="acc-btn arrow" data-key="arrow-down" title="Next Command (Down)">&darr;</button>
+        <button type="button" class="acc-btn arrow" data-key="arrow-left" title="Move Left">&larr;</button>
+        <button type="button" class="acc-btn arrow" data-key="arrow-right" title="Move Right">&rarr;</button>
+        <button type="button" class="acc-btn symbol" data-raw="|">|</button>
+        <button type="button" class="acc-btn symbol" data-raw="/">/</button>
+        <button type="button" class="acc-btn symbol" data-raw="~">~</button>
+        <button type="button" class="acc-btn symbol" data-raw="-">-</button>
+        <button type="button" class="acc-btn symbol" data-raw="_">_</button>
+      </div>
+    </nav>
+  </div>
+
+  <script src="/static/vendor/xterm/xterm.js"></script>
+  <script src="/static/vendor/xterm/xterm-addon-fit.js"></script>
+  <script src="/static/terminal.js"></script>
+</body>
+</html>
