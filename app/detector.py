@@ -273,3 +273,53 @@ def is_daemon_alive():
             return resp.status == 200
     except Exception:
         return False
+
+
+def get_host_audio_status():
+    """Detect master audio volume percentage and mute status on host machine."""
+    # 1. Primary: wpctl (WirePlumber default in modern Linux)
+    try:
+        res = subprocess.run(
+            ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if res.returncode == 0 and res.stdout:
+            out = res.stdout.strip()
+            is_muted = "[MUTED]" in out
+            m = re.search(r"Volume:\s*([0-9.]+)", out)
+            if m:
+                vol_float = float(m.group(1))
+                return {
+                    "supported": True,
+                    "volume": int(round(vol_float * 100)),
+                    "muted": is_muted,
+                }
+    except Exception:
+        pass
+
+    # 2. Secondary fallback: amixer (ALSA)
+    try:
+        res = subprocess.run(
+            ["amixer", "get", "Master"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if res.returncode == 0 and res.stdout:
+            out = res.stdout
+            m_pct = re.search(r"\[([0-9]+)%\]", out)
+            m_state = re.search(r"\[(on|off)\]", out)
+            pct = int(m_pct.group(1)) if m_pct else 0
+            is_muted = m_state.group(1) == "off" if m_state else False
+            return {
+                "supported": True,
+                "volume": pct,
+                "muted": is_muted,
+            }
+    except Exception:
+        pass
+
+    return {"supported": False, "volume": 0, "muted": False}
+

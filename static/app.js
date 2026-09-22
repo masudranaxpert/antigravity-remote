@@ -220,6 +220,39 @@
       pcStatusText.style.color = 'var(--text-secondary)';
     }
 
+    // Audio Telemetry
+    const audioPill = document.getElementById('host-audio-pill');
+    const audioStatusText = document.getElementById('audio-status-text');
+    const audioIcon = document.getElementById('audio-icon-elem');
+
+    if (audioPill && audioStatusText && audioIcon) {
+      const audio = data.audio;
+      if (!audio || !audio.supported) {
+        audioPill.classList.add('unsupported');
+      } else {
+        audioPill.classList.remove('unsupported');
+        if (audio.muted) {
+          audioPill.classList.add('muted');
+          audioStatusText.textContent = 'Muted';
+          audioPill.title = `Host Audio is Muted (${audio.volume}%). Click to unmute.`;
+          audioIcon.innerHTML = `
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <line x1="23" y1="9" x2="17" y2="15"></line>
+            <line x1="17" y1="9" x2="23" y2="15"></line>
+          `;
+        } else {
+          audioPill.classList.remove('muted');
+          audioStatusText.textContent = `${audio.volume}%`;
+          audioPill.title = `Host Audio: ${audio.volume}%. Click to mute.`;
+          audioIcon.innerHTML = `
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+            ${audio.volume > 50 ? '<path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>' : ''}
+          `;
+        }
+      }
+    }
+
     // 2. Gateway & Remote Launcher
     const deviceName = data.remote_device_name || 'Host Machine';
     gatewayHeading.textContent = `${deviceName} Remote Session`;
@@ -431,7 +464,7 @@
     if (refreshBtn) refreshBtn.classList.remove('spinning');
 
     if (data.need_login) {
-      renderAuthScreen();
+      window.location.reload();
       return;
     }
 
@@ -451,6 +484,44 @@
     const refreshBtn = document.getElementById('refresh-btn');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', () => loadStateData(true));
+    }
+
+    const audioPill = document.getElementById('host-audio-pill');
+    if (audioPill) {
+      audioPill.addEventListener('click', async () => {
+        const res = await apiRequest('/api/audio/mute', { method: 'POST' });
+        if (res && res.success && res.audio) {
+          const a = res.audio;
+          showToast(a.muted ? 'Host master audio muted' : `Host master audio unmuted (${a.volume}%)`, 'info');
+          const audioStatusText = document.getElementById('audio-status-text');
+          const audioIcon = document.getElementById('audio-icon-elem');
+          if (a.muted) {
+            audioPill.classList.add('muted');
+            if (audioStatusText) audioStatusText.textContent = 'Muted';
+            audioPill.title = `Host Audio is Muted (${a.volume}%). Click to unmute.`;
+            if (audioIcon) {
+              audioIcon.innerHTML = `
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <line x1="23" y1="9" x2="17" y2="15"></line>
+                <line x1="17" y1="9" x2="23" y2="15"></line>
+              `;
+            }
+          } else {
+            audioPill.classList.remove('muted');
+            if (audioStatusText) audioStatusText.textContent = `${a.volume}%`;
+            audioPill.title = `Host Audio: ${a.volume}%. Click to mute.`;
+            if (audioIcon) {
+              audioIcon.innerHTML = `
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                ${a.volume > 50 ? '<path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>' : ''}
+              `;
+            }
+          }
+        } else {
+          showToast('Failed to toggle host audio mute', 'err');
+        }
+      });
     }
 
     const toggleDrawerBtn = document.getElementById('toggle-drawer-btn');

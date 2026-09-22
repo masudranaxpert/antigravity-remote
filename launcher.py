@@ -123,6 +123,19 @@ def main():
 
     mobile_access_url = f"{tunnel_url}/?token={token}" if token else tunnel_url
 
+    # Save active tunnel URL to state.json for programmatic access
+    try:
+        st_data = {}
+        if os.path.exists(STATE_PATH):
+            with open(STATE_PATH, "r", encoding="utf-8") as f:
+                st_data = json.load(f)
+        st_data["tunnel_url"] = tunnel_url
+        st_data["mobile_access_url"] = mobile_access_url
+        with open(STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(st_data, f, indent=2)
+    except Exception:
+        pass
+
     # 4. Display Premium Terminal Dashboard Banner
     print("\033[2J\033[H", end="")  # Clear screen and move cursor to home
     print("\033[1;36m" + "=" * 74 + "\033[0m")

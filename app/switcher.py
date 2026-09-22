@@ -204,3 +204,32 @@ def apply_switch(account_id, target_ide="classic"):
     launch_antigravity_clean(target_ide)
 
     return True, f"Successfully switched to {email}. Antigravity restarted on PC."
+
+
+def toggle_host_audio_mute():
+    """Toggle host master audio mute state using wpctl or amixer."""
+    # 1. Primary: WirePlumber
+    try:
+        res = subprocess.run(
+            ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"],
+            capture_output=True,
+            timeout=2,
+        )
+        if res.returncode == 0:
+            return True
+    except Exception:
+        pass
+
+    # 2. Secondary fallback: ALSA amixer
+    try:
+        res = subprocess.run(
+            ["amixer", "set", "Master", "toggle"],
+            capture_output=True,
+            timeout=2,
+        )
+        if res.returncode == 0:
+            return True
+    except Exception:
+        pass
+
+    return False

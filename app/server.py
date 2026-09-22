@@ -12,12 +12,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from app.detector import (
+    get_host_audio_status,
     get_official_remote_info,
     is_antigravity_running,
     is_daemon_alive,
     load_accounts,
 )
-from app.switcher import apply_switch, launch_antigravity_clean
+from app.switcher import apply_switch, launch_antigravity_clean, toggle_host_audio_mute
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -153,6 +154,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         if path == "/":
             authed, st, from_query = self.is_authenticated()
+            if not authed:
+                auth_file = os.path.join(TEMPLATES_DIR, "auth.html")
+                return self.send_file(auth_file, "text/html; charset=utf-8")
+
             cookie_to_set = st.get("mobile_token") if from_query else None
             html_file = os.path.join(TEMPLATES_DIR, "index.html")
             return self.send_file(html_file, "text/html; charset=utf-8", set_cookie_token=cookie_to_set)
@@ -175,6 +180,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "source": "direct_filesystem",
                 "daemon_alive": is_daemon_alive(),
                 "antigravity_running": is_antigravity_running(),
+                "audio": get_host_audio_status(),
             })
 
         self.send_json({"error": "not_found"}, 404)
@@ -218,6 +224,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
             save_state(st)
             return self.send_json({"success": True})
 
+        if path == "/api/audio/mute":
+            toggle_host_audio_mute()
+            return self.send_json({
+                "success": True,
+                "audio": get_host_audio_status(),
+            })
+
         self.send_json({"error": "not_found"}, 404)
 
     def log_message(self, format, *args):
@@ -246,3 +259,7 @@ def run_server(port=DEFAULT_PORT):
         server.serve_forever()
     except KeyboardInterrupt:
         server.server_close()
+
+
+if __name__ == "__main__":
+    run_server()
