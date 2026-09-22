@@ -11,10 +11,8 @@
   let toastTimer = null;
   let autoRefreshTimer = null;
 
-  // Auto-capture token from URL query string and persist as cookie
-  const queryToken = new URLSearchParams(window.location.search).get('token');
-  if (queryToken) {
-    document.cookie = `mrt=${encodeURIComponent(queryToken)};max-age=31536000;path=/;SameSite=Lax`;
+  // Clean URL query string without exposing master token in browser address bar
+  if (window.location.search.includes('token=')) {
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 
@@ -315,6 +313,16 @@
             ${audio.volume > 50 ? '<path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>' : ''}
           `;
         }
+      }
+    }
+
+    // Terminal Access Killswitch Visibility
+    const terminalNavBtn = document.getElementById('terminal-nav-btn');
+    if (terminalNavBtn) {
+      if (data.terminal_enabled === false) {
+        terminalNavBtn.style.display = 'none';
+      } else {
+        terminalNavBtn.style.display = '';
       }
     }
 

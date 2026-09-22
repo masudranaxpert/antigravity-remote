@@ -98,7 +98,8 @@ All application settings are persisted in `state.json` in the root directory.
   "mobile_token": "your-random-token",
   "custom_domain": "remote.yourdomain.com",
   "tunnel_mode": "permanent",
-  "prevent_sleep": true
+  "prevent_sleep": true,
+  "terminal_enabled": true
 }
 ```
 
@@ -108,6 +109,7 @@ All application settings are persisted in `state.json` in the root directory.
 | `custom_domain` | `string` | `""` | Your registered Cloudflare Zero Trust public hostname (e.g. `remote.yourdomain.com`). Used for permanent link generation. |
 | `tunnel_mode` | `string` | `"auto"` | Controls how the remote tunnel behaves. See mode table below. |
 | `prevent_sleep` | `boolean` | `true` | When `true`, prevents host OS auto-suspend and idle sleep while the server runs using Linux native `systemd-inhibit`. Toggleable from the mobile web UI. |
+| `terminal_enabled` | `boolean` | `true` | When `false`, completely locks down and disables the Mobile Web Terminal (returns HTTP 403 and hides button in UI). |
 
 ### Tunnel Modes (`tunnel_mode`)
 
@@ -145,6 +147,10 @@ python3 launcher.py --local
 # Sleep Prevention (Keep-Awake) controls
 python3 launcher.py --prevent-sleep  # Keep host awake (auto-suspend blocked)
 python3 launcher.py --allow-sleep    # Allow normal OS idle sleep/suspend
+
+# Terminal Access controls
+python3 launcher.py --disable-terminal  # Block and disable interactive web terminal
+python3 launcher.py --enable-terminal   # Enable interactive web terminal
 
 # Display CLI help
 python3 launcher.py --help

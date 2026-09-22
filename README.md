@@ -17,7 +17,10 @@
 - **Official Remote Gateway**: Generates one-tap Google Account Chooser remote desktop links with pre-authorized active credentials.
 - **Dual Quota Telemetry**: Clean, unnested tracking for Gemini and Claude with live countdown reset timers.
 - **Multi-Mode Tunnel Engine**: Instant support for permanent Cloudflare Zero Trust custom domains, temporary Quick Tunnels (`trycloudflare.com`), Dual Mode, and Localhost-only.
-- **Studio-Grade UI**: Refined dark palette (`#0d0f12`), zero layout thrashing, dedicated server-side auth gate (zero FOUC), and responsive layouts.
+- **Anti-Cookie-Theft & Device Binding**: Cryptographically signed ephemeral session tokens bound to the client's device fingerprint (OS, browser, platform). Even if an attacker copies the cookie header, replay attempts on different devices or browsers are immediately rejected with HTTP 401.
+- **Access Audit Logging (`log/ip.json`)**: Persistent audit logging recording client IP, Cloudflare country/datacenter, device type, OS, and browser with automatic 30-day retention and self-cleaning.
+- **Terminal Access Killswitch**: Instantly toggle shell terminal access on/off via `state.json`, `static.json`, CLI (`--disable-terminal`), or web API.
+- **Studio-Grade UI**: Refined dark palette (`#0d0f12`), symmetrical mobile action buttons, zero layout thrashing, dedicated server-side auth gate (zero FOUC), and responsive layouts.
 - **Zero Dependencies**: 100% Python standard library. No pip packages, no node_modules.
 - **Desktop & Terminal Integration**: Dedicated desktop shortcut with independent taskbar icon and live request streaming.
 
@@ -62,10 +65,12 @@ https://<your-tunnel>.trycloudflare.com/?token=<your-token>
 ---
 
 ## Security
-
-- Requests are authenticated via a cryptographically random token stored locally in `state.json`.
-- Traffic is encrypted end-to-end through Cloudflare TLS.
-- Local server binds strictly to `127.0.0.1`.
+ 
+- **Device-Bound Ephemeral Sessions**: Uses HMAC-signed tokens tied to the authorized client's browser and device fingerprint. Session tokens cannot be replayed from other devices.
+- **HttpOnly & SameSite Protection**: Cookies are transmitted with `HttpOnly; SameSite=Lax` headers, immune to client-side XSS exfiltration.
+- **Access Audit Trail**: All authentication attempts, incoming client IPs, and device details are logged in `log/ip.json` with 30-day retention.
+- **Terminal Killswitch**: Web shell access is gated by both authentication and an administrative toggle in `state.json`/`static.json`.
+- **Zero-Trust Network Perimeter**: Traffic is encrypted end-to-end via Cloudflare TLS, with the local daemon listening strictly on loopback `127.0.0.1`.
 
 ---
 

@@ -282,7 +282,101 @@ def run_checks():
             assert "Invalid" in switch_res.get("error", "") or "Access denied" in switch_res.get("error", "")
         print("PASS: Malicious account_id path traversal rejected")
 
-        # J. State file permission check (0o600)
+        # J. Anti-Cookie-Theft & Device-Bound Session Security Check
+        # Legitimate mobile device registers session
+        legit_ua = "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 Chrome/120.0 Mobile"
+        legit_req = urllib.request.Request(f"http://127.0.0.1:{test_port}/?token={token}", headers={"User-Agent": legit_ua})
+        with urllib.request.urlopen(legit_req, timeout=3) as resp:
+            set_cookie_hdr = resp.headers.get("Set-Cookie", "")
+            assert "mrt=v1." in set_cookie_hdr, f"Expected signed session token in Set-Cookie, got: {set_cookie_hdr}"
+            assert "HttpOnly" in set_cookie_hdr, "Missing HttpOnly flag in cookie"
+            session_cookie = set_cookie_hdr.split(";")[0].split("=")[1]
+
+        # Authorized device uses the session cookie -> 200 OK
+        authed_mobile_req = urllib.request.Request(
+            f"http://127.0.0.1:{test_port}/api/state",
+            headers={"Cookie": f"mrt={session_cookie}", "User-Agent": legit_ua},
+        )
+        with urllib.request.urlopen(authed_mobile_req, timeout=3) as resp:
+            assert resp.status == 200, f"Expected 200 for authorized device, got {resp.status}"
+
+        # Attacker steals cookie and replays from different device/browser -> 401 Unauthorized
+        attacker_ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/17.0"
+        stolen_cookie_req = urllib.request.Request(
+            f"http://127.0.0.1:{test_port}/api/state",
+            headers={"Cookie": f"mrt={session_cookie}", "User-Agent": attacker_ua},
+        )
+        try:
+            urllib.request.urlopen(stolen_cookie_req, timeout=3)
+            assert False, "Security failure: Stolen cookie was accepted from different device/User-Agent"
+        except urllib.error.HTTPError as e:
+            assert e.code == 401, f"Expected 401 for cookie replay on mismatched device, got {e.code}"
+        print("PASS: Anti-cookie-hijacking device binding verified (Cookie replay rejected with HTTP 401)")
+
+        # K. Access Audit Logging (log/ip.json) & 30-day retention check
+        from app.audit import IP_LOG_PATH, load_ip_log, purge_expired_records
+        assert os.path.exists(IP_LOG_PATH), "Expected log/ip.json to be created"
+        ip_data = load_ip_log()
+        assert "devices" in ip_data and len(ip_data["devices"]) > 0, "No device telemetry in log/ip.json"
+        assert ip_data.get("retention_days") == 30, "Expected 30-day retention policy"
+        
+        # Test 30-day purge logic
+        test_now = 1000000000.0
+        stale_data = {
+            "devices": {
+                "1.1.1.1": {"last_seen_epoch": test_now - (35 * 86400)},  # 35 days old (should be purged)
+                "2.2.2.2": {"last_seen_epoch": test_now - (5 * 86400)},   # 5 days old (should survive)
+            },
+            "recent_events": [
+                {"epoch": test_now - (35 * 86400)},
+                {"epoch": test_now - (5 * 86400)},
+            ]
+        }
+        purged = purge_expired_records(stale_data, test_now)
+        assert "1.1.1.1" not in purged["devices"], "35-day old device record was not purged"
+        assert "2.2.2.2" in purged["devices"], "5-day old device record was wrongly purged"
+        assert len(purged["recent_events"]) == 1, "Stale events were not purged"
+        print("PASS: Access audit logging (log/ip.json) & 30-day retention auto-purge verified")
+
+        # L. Terminal Access Killswitch (state.json / static.json toggle)
+        from app.server import save_state
+        cur_st = load_state()
+        cur_st["terminal_enabled"] = False
+        save_state(cur_st)
+
+        # /terminal should return 403 Forbidden
+        req_term_disabled = urllib.request.Request(
+            f"http://127.0.0.1:{test_port}/terminal",
+            headers={"Cookie": f"mrt={session_cookie}", "User-Agent": legit_ua},
+        )
+        try:
+            urllib.request.urlopen(req_term_disabled, timeout=3)
+            assert False, "Expected 403 for /terminal when terminal_enabled is False"
+        except urllib.error.HTTPError as e:
+            assert e.code == 403, f"Expected 403, got {e.code}"
+
+        # /api/terminal/ws should return 403 Forbidden
+        req_ws_disabled = urllib.request.Request(
+            f"http://127.0.0.1:{test_port}/api/terminal/ws",
+            headers={"Cookie": f"mrt={session_cookie}", "User-Agent": legit_ua},
+        )
+        try:
+            urllib.request.urlopen(req_ws_disabled, timeout=3)
+            assert False, "Expected 403 for /api/terminal/ws when terminal_enabled is False"
+        except urllib.error.HTTPError as e:
+            assert e.code == 403, f"Expected 403, got {e.code}"
+
+        # Restore terminal access
+        cur_st["terminal_enabled"] = True
+        save_state(cur_st)
+
+        req_term_enabled = urllib.request.Request(
+            f"http://127.0.0.1:{test_port}/terminal",
+            headers={"Cookie": f"mrt={session_cookie}", "User-Agent": legit_ua},
+        )
+        with urllib.request.urlopen(req_term_enabled, timeout=3) as resp:
+            assert resp.status == 200, f"Expected 200 when terminal re-enabled, got {resp.status}"
+        print("PASS: Terminal access killswitch enforced (403 Forbidden on disabled state)")
         from app.server import STATE_PATH
         mode = os.stat(STATE_PATH).st_mode & 0o777
         assert mode == 0o600, f"Expected state.json mode 0600, found {oct(mode)}"

@@ -137,6 +137,25 @@ Options:
     elif "--prevent-sleep" in args:
         set_sleep_inhibit(True)
 
+    if "--disable-terminal" in args or "--no-terminal" in args:
+        try:
+            with open(STATE_PATH, "r", encoding="utf-8") as f:
+                cur_st = json.load(f)
+            cur_st["terminal_enabled"] = False
+            with open(STATE_PATH, "w", encoding="utf-8") as f:
+                json.dump(cur_st, f, indent=2)
+        except Exception:
+            pass
+    elif "--enable-terminal" in args:
+        try:
+            with open(STATE_PATH, "r", encoding="utf-8") as f:
+                cur_st = json.load(f)
+            cur_st["terminal_enabled"] = True
+            with open(STATE_PATH, "w", encoding="utf-8") as f:
+                json.dump(cur_st, f, indent=2)
+        except Exception:
+            pass
+
     # 1. Start Server in Background Thread
     print("\033[96m[*] Starting Antigravity Remote Server on port 8077...\033[0m", flush=True)
     server_thread = threading.Thread(target=run_server, args=(PORT,), daemon=True)
@@ -208,6 +227,9 @@ Options:
     print(f"  \033[1;32m[✓] Local Port     :\033[0m http://127.0.0.1:{PORT}")
     sleep_disp = "\033[1;32mActive (Host auto-suspend blocked)\033[0m" if get_sleep_inhibit_status() else "\033[90mDisabled (Normal OS sleep)\033[0m"
     print(f"  \033[1;32m[✓] Sleep Inhibit  :\033[0m {sleep_disp}")
+    term_on = bool(st_data.get("terminal_enabled", True))
+    term_disp = "\033[1;32mEnabled (Interactive Shell Online)\033[0m" if term_on else "\033[91mDisabled (Access Blocked)\033[0m"
+    print(f"  \033[1;32m[✓] Web Terminal   :\033[0m {term_disp}")
 
     if mode == "dual" or (perm_url and quick_url):
         print(f"  \033[1;32m[✓] Permanent URL  :\033[0m {perm_url or 'Active (System Service)'}")

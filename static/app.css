@@ -439,9 +439,9 @@ body {
 .terminal-nav-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   height: 38px;
-  padding: 0 11px;
   border-radius: var(--radius-md);
   background-color: var(--surface-raised);
   border: 1px solid var(--border);
@@ -452,6 +452,28 @@ body {
   transition: all 0.15s ease;
   user-select: none;
   font-family: inherit;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+@media (max-width: 560px) {
+  .terminal-nav-btn {
+    width: 38px;
+    height: 38px;
+    padding: 0;
+  }
+  .terminal-nav-btn .terminal-btn-label {
+    display: none;
+  }
+}
+
+@media (min-width: 561px) {
+  .terminal-nav-btn {
+    padding: 0 11px;
+  }
+  .terminal-nav-btn .terminal-btn-label {
+    display: inline;
+  }
 }
 
 .terminal-nav-btn svg {
