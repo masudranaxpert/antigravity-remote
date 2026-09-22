@@ -284,6 +284,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
 
+    def send_auth_page(self, st):
+        """Serve auth.html with injected TOTP state and strict no-cache headers."""
+        auth_file = os.path.join(TEMPLATES_DIR, "auth.html")
+        if not os.path.exists(auth_file):
+            return self.send_json({"error": "Auth page missing"}, 500)
+        try:
+            with open(auth_file, "r", encoding="utf-8") as f:
+                content = f.read()
+            totp_val = "true" if st.get("totp_enabled", False) else "false"
+            content = content.replace("/*__SERVER_TOTP__*/false", totp_val)
+            data = content.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+
     def do_GET(self):
         """Route GET requests for static assets, templates, and state endpoints."""
         parsed = urlparse(self.path)
@@ -346,8 +366,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 auth_reason=reason,
             )
             if not authed:
-                auth_file = os.path.join(TEMPLATES_DIR, "auth.html")
-                return self.send_file(auth_file, "text/html; charset=utf-8")
+                return self.send_auth_page(st)
 
             html_file = os.path.join(TEMPLATES_DIR, "index.html")
             return self.send_file(html_file, "text/html; charset=utf-8", set_cookie_token=new_cookie)
@@ -479,9 +498,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
             if st.get("totp_enabled", False):
                 secret = st.get("totp_secret", "")
-                if not otp or not verify_totp(secret, otp):
+                if not otp:
+                    record_client_access(self.headers, self.client_address, path, "POST", 401, False, "missing_totp_code")
+                    return self.send_json({
+                        "success": False,
+                        "error": "2-Factor Authentication active. Please enter the 6-digit Authenticator code.",
+                        "totp_required": True,
+                    }, 401)
+
+                if not verify_totp(secret, otp, window=2):
                     record_client_access(self.headers, self.client_address, path, "POST", 401, False, "invalid_totp_code")
-                    return self.send_json({"success": False, "error": "Invalid 6-digit Authenticator code."}, 401)
+                    return self.send_json({
+                        "success": False,
+                        "error": "Invalid 6-digit Authenticator code. Check your Google Authenticator app.",
+                        "totp_required": True,
+                    }, 401)
 
             current_fp = compute_client_fingerprint(self.headers)
             session_cookie = generate_session_token(master_token, current_fp)

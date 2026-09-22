@@ -152,8 +152,10 @@ def run_checks():
         print("PASS: Unauthenticated GET / serves clean auth page directly (Zero FOUC)")
 
         # C. Authenticated GET /?token=... must serve index.html and set cookie
-        token = load_state().get("mobile_token", "")
-        req = urllib.request.Request(f"http://127.0.0.1:{test_port}/?token={token}")
+        st_now = load_state()
+        token = st_now.get("mobile_token", "")
+        otp_param = f"&otp={compute_totp(st_now.get('totp_secret', ''))}" if st_now.get("totp_enabled", False) else ""
+        req = urllib.request.Request(f"http://127.0.0.1:{test_port}/?token={token}{otp_param}")
         with urllib.request.urlopen(req, timeout=3) as resp:
             body = resp.read().decode("utf-8")
             assert "Antigravity Mobile Switcher" in body, "Expected dashboard template for authenticated request"
@@ -226,7 +228,7 @@ def run_checks():
             assert "Unlock Antigravity Remote" in t_body or "auth-token-input" in t_body, "Expected auth page for unauth /terminal"
             assert "terminal-container" not in t_body, "Terminal markup leaked into unauthenticated response"
 
-        req_term_auth = urllib.request.Request(f"http://127.0.0.1:{test_port}/terminal?token={token}")
+        req_term_auth = urllib.request.Request(f"http://127.0.0.1:{test_port}/terminal?token={token}{otp_param}")
         with urllib.request.urlopen(req_term_auth, timeout=3) as resp:
             t_body_auth = resp.read().decode("utf-8")
             assert "terminal-container" in t_body_auth, "Expected terminal template for authenticated request"
@@ -238,7 +240,7 @@ def run_checks():
         ws_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         ws_sock.connect(("127.0.0.1", test_port))
         ws_req = (
-            f"GET /api/terminal/ws?token={token}&cols=80&rows=24 HTTP/1.1\r\n"
+            f"GET /api/terminal/ws?token={token}{otp_param}&cols=80&rows=24 HTTP/1.1\r\n"
             f"Host: 127.0.0.1:{test_port}\r\n"
             "Upgrade: websocket\r\n"
             "Connection: Upgrade\r\n"
@@ -364,7 +366,7 @@ def run_checks():
         # J. Anti-Cookie-Theft & Device-Bound Session Security Check
         # Legitimate mobile device registers session
         legit_ua = "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 Chrome/120.0 Mobile"
-        legit_req = urllib.request.Request(f"http://127.0.0.1:{test_port}/?token={token}", headers={"User-Agent": legit_ua})
+        legit_req = urllib.request.Request(f"http://127.0.0.1:{test_port}/?token={token}{otp_param}", headers={"User-Agent": legit_ua})
         with urllib.request.urlopen(legit_req, timeout=3) as resp:
             set_cookie_hdr = resp.headers.get("Set-Cookie", "")
             assert "mrt=v1." in set_cookie_hdr, f"Expected signed session token in Set-Cookie, got: {set_cookie_hdr}"
@@ -462,6 +464,12 @@ def run_checks():
         print(f"PASS: state.json restricted to owner-only permissions ({oct(mode)})")
 
         # M. Login Verification Endpoint (/api/auth/verify) & 24h Set-Cookie Check
+        orig_st = load_state()
+        orig_totp = bool(orig_st.get("totp_enabled", False))
+        if orig_totp:
+            orig_st["totp_enabled"] = False
+            save_state(orig_st)
+
         req_bad_auth = urllib.request.Request(
             f"http://127.0.0.1:{test_port}/api/auth/verify",
             data=json.dumps({"token": "wrong_token_xyz"}).encode("utf-8"),
@@ -531,7 +539,7 @@ def run_checks():
                 otp_cookie = resp.headers.get("Set-Cookie", "")
                 assert "Max-Age=86400" in otp_cookie
         finally:
-            demo_st["totp_enabled"] = False
+            demo_st["totp_enabled"] = orig_totp
             save_state(demo_st)
 
         print("PASS: 24-hour cookie lifetime and Authenticator App 2FA (TOTP) auth flow verified")

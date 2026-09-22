@@ -164,46 +164,51 @@
   </div>
 
   <script>
-    (async function initAuth() {
-      const urlParams = new URLSearchParams(window.location.search);
-      const queryToken = urlParams.get('token');
-      const tokenInput = document.getElementById('auth-token-input');
-      const otpContainer = document.getElementById('otp-container');
-      const otpInput = document.getElementById('auth-otp-input');
-      const subtext = document.getElementById('auth-subtext');
+    window.__SERVER_TOTP__ = /*__SERVER_TOTP__*/false;
 
+    const urlParams = new URLSearchParams(window.location.search);
+    const queryToken = urlParams.get('token');
+    const tokenInput = document.getElementById('auth-token-input');
+    const otpContainer = document.getElementById('otp-container');
+    const otpInput = document.getElementById('auth-otp-input');
+    const subtext = document.getElementById('auth-subtext');
+
+    function enableOtpUi() {
+      otpContainer.style.display = 'block';
+      otpInput.required = true;
+      if (queryToken) {
+        tokenInput.style.display = 'none';
+        subtext.textContent = '2-Factor Authentication active. Enter the 6-digit code from your Authenticator app.';
+        setTimeout(() => otpInput.focus(), 80);
+      } else {
+        subtext.textContent = 'Enter your token and 6-digit Authenticator code.';
+      }
+    }
+
+    (async function initAuth() {
       if (queryToken) {
         tokenInput.value = queryToken;
       }
 
-      // Check if 2FA (TOTP) is active on the server
-      try {
-        const resp = await fetch('/api/auth/status');
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.totp_enabled) {
-            otpContainer.style.display = 'block';
-            otpInput.required = true;
-            if (queryToken) {
-              tokenInput.style.display = 'none';
-              subtext.textContent = '2-Factor Authentication active. Enter the 6-digit code from your Authenticator app.';
-              setTimeout(() => otpInput.focus(), 100);
-            } else {
-              subtext.textContent = 'Enter your token and 6-digit Authenticator code.';
-            }
+      if (window.__SERVER_TOTP__) {
+        enableOtpUi();
+      } else {
+        try {
+          const resp = await fetch('/api/auth/status');
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.totp_enabled) enableOtpUi();
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
 
-      if (!queryToken) {
+      if (!queryToken && !window.__SERVER_TOTP__) {
         tokenInput.focus();
       }
     })();
 
     async function handleAuthSubmit(e) {
       if (e) e.preventDefault();
-      const tokenInput = document.getElementById('auth-token-input');
-      const otpInput = document.getElementById('auth-otp-input');
       const errorBox = document.getElementById('auth-error');
       const btn = document.getElementById('auth-btn');
 
@@ -225,9 +230,12 @@
 
         const res = await resp.json();
         if (resp.ok && res.success) {
-          // Clean token from address bar and reload to dashboard
           window.location.href = window.location.pathname;
         } else {
+          if (res.totp_required) {
+            enableOtpUi();
+            setTimeout(() => otpInput.focus(), 80);
+          }
           errorBox.textContent = res.error || 'Authentication failed. Please check your credentials.';
           errorBox.style.display = 'block';
           btn.disabled = false;

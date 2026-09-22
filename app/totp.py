@@ -42,8 +42,8 @@ def compute_totp(secret: str, for_time: float | None = None) -> str:
     return f"{code_int:06d}"
 
 
-def verify_totp(secret: str, user_code: str, window: int = 1) -> bool:
-    """Verify 6-digit TOTP token allowing clock skew of window steps (+-30s)."""
+def verify_totp(secret: str, user_code: str, window: int = 2) -> bool:
+    """Verify 6-digit TOTP token allowing clock skew of window steps (+-60s with window=2)."""
     if not secret or not user_code:
         return False
 
