@@ -168,17 +168,6 @@ body {
   white-space: nowrap;
 }
 
-.brand-tag {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  background-color: var(--gemini-bg);
-  border: 1px solid var(--gemini-border);
-  color: var(--gemini-accent);
-}
-
 .brand-subtitle {
   font-size: 11.5px;
   color: var(--text-secondary);
@@ -515,10 +504,21 @@ body {
   animation: spin 0.8s linear infinite;
 }
 
-.logout-btn:hover {
+.logout-btn {
   color: #f87171;
-  border-color: rgba(248, 113, 113, 0.4);
-  background-color: rgba(248, 113, 113, 0.08);
+  background-color: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.22);
+}
+
+.logout-btn:hover {
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.45);
+  background-color: rgba(239, 68, 68, 0.16);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.18);
+}
+
+.logout-btn:active {
+  transform: scale(0.96);
 }
 
 @media (min-width: 640px) {

@@ -161,11 +161,16 @@ html, body {
 
 .logout-tool-btn {
   text-decoration: none;
+  color: #f87171;
+  background-color: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.22);
 }
 
 .logout-tool-btn:hover {
-  color: #f87171;
-  border-color: rgba(248, 113, 113, 0.4);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.45);
+  background-color: rgba(239, 68, 68, 0.16);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.18);
 }
 
 /* Quick Commands Bar */
