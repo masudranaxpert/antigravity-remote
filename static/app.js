@@ -269,6 +269,22 @@
       }
     }
 
+    // Sleep Prevention (Keep-Awake) Telemetry
+    const sleepPill = document.getElementById('sleep-prevent-pill');
+    const sleepStatusText = document.getElementById('sleep-status-text');
+    if (sleepPill && sleepStatusText) {
+      const isAwake = Boolean(data.prevent_sleep);
+      if (isAwake) {
+        sleepPill.className = 'sleep-pill active';
+        sleepStatusText.textContent = 'Awake';
+        sleepPill.title = 'Host Sleep Prevention Active (Host will not auto-suspend). Click to allow sleep.';
+      } else {
+        sleepPill.className = 'sleep-pill idle';
+        sleepStatusText.textContent = 'Auto-Sleep';
+        sleepPill.title = 'Host Sleep Prevention Off (Host will auto-suspend when idle). Click to keep awake.';
+      }
+    }
+
     // Audio Telemetry
     const audioPill = document.getElementById('host-audio-pill');
     const audioStatusText = document.getElementById('audio-status-text');
@@ -572,6 +588,34 @@
     const refreshBtn = document.getElementById('refresh-btn');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', () => loadStateData(true));
+    }
+
+    const sleepPill = document.getElementById('sleep-prevent-pill');
+    if (sleepPill) {
+      sleepPill.addEventListener('click', async () => {
+        const res = await apiRequest('/api/sleep/toggle', { method: 'POST' });
+        if (res && res.success) {
+          const isAwake = Boolean(res.prevent_sleep);
+          showToast(
+            isAwake
+              ? 'Host keep-awake enabled (Auto-suspend blocked)'
+              : 'Host keep-awake disabled (Normal OS sleep allowed)',
+            'info'
+          );
+          const sleepStatusText = document.getElementById('sleep-status-text');
+          if (isAwake) {
+            sleepPill.className = 'sleep-pill active';
+            if (sleepStatusText) sleepStatusText.textContent = 'Awake';
+            sleepPill.title = 'Host Sleep Prevention Active (Host will not auto-suspend). Click to allow sleep.';
+          } else {
+            sleepPill.className = 'sleep-pill idle';
+            if (sleepStatusText) sleepStatusText.textContent = 'Auto-Sleep';
+            sleepPill.title = 'Host Sleep Prevention Off (Host will auto-suspend when idle). Click to keep awake.';
+          }
+        } else {
+          showToast('Failed to toggle host sleep prevention', 'err');
+        }
+      });
     }
 
     const audioPill = document.getElementById('host-audio-pill');

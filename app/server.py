@@ -19,7 +19,13 @@ from app.detector import (
     is_daemon_alive,
     load_accounts,
 )
-from app.switcher import apply_switch, launch_antigravity_clean, toggle_host_audio_mute
+from app.switcher import (
+    apply_switch,
+    get_sleep_inhibit_status,
+    launch_antigravity_clean,
+    set_sleep_inhibit,
+    toggle_host_audio_mute,
+)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -35,7 +41,8 @@ def load_state():
     """Load persistent mobile token and saved settings, auto-generating token if missing."""
     if not os.path.exists(STATE_PATH):
         init_state = {
-            "mobile_token": secrets.token_urlsafe(24)
+            "mobile_token": secrets.token_urlsafe(24),
+            "prevent_sleep": True,
         }
         save_state(init_state)
         return init_state
@@ -46,12 +53,18 @@ def load_state():
     try:
         with open(STATE_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
+            updated = False
             if not data.get("mobile_token"):
                 data["mobile_token"] = secrets.token_urlsafe(24)
+                updated = True
+            if "prevent_sleep" not in data:
+                data["prevent_sleep"] = True
+                updated = True
+            if updated:
                 save_state(data)
             return data
     except Exception:
-        return {"mobile_token": secrets.token_urlsafe(24)}
+        return {"mobile_token": secrets.token_urlsafe(24), "prevent_sleep": True}
 
 
 def save_state(state):
@@ -196,6 +209,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "daemon_alive": is_daemon_alive(),
                 "antigravity_running": is_antigravity_running(),
                 "audio": get_host_audio_status(),
+                "prevent_sleep": get_sleep_inhibit_status(),
             })
 
         self.send_json({"error": "not_found"}, 404)
@@ -243,6 +257,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "audio": get_host_audio_status(),
             })
 
+        if path == "/api/sleep/toggle":
+            st_cur = load_state()
+            new_val = not st_cur.get("prevent_sleep", True)
+            st_cur["prevent_sleep"] = new_val
+            save_state(st_cur)
+            set_sleep_inhibit(new_val)
+            return self.send_json({
+                "success": True,
+                "prevent_sleep": new_val,
+                "active": get_sleep_inhibit_status(),
+            })
+
         self.send_json({"error": "not_found"}, 404)
 
     def log_message(self, format, *args):
@@ -263,8 +289,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
         print(f"\033[90m[{now}]\033[0m {req} -> {stat_color}{status}{reset}", flush=True)
 
 
-def run_server(port=DEFAULT_PORT):
+def run_server(port=DEFAULT_PORT, init_sleep_inhibit=True):
     """Start threaded HTTP server listening on localhost."""
+    if init_sleep_inhibit:
+        st = load_state()
+        if st.get("prevent_sleep", True):
+            set_sleep_inhibit(True)
+
     server = ThreadingHTTPServer(("127.0.0.1", port), DashboardHandler)
     print(f"Antigravity Mobile Switcher running on http://127.0.0.1:{port}", flush=True)
     try:

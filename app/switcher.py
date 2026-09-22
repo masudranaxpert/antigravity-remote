@@ -3,11 +3,13 @@
 Applies direct Secret Service and file-based credential updates without
 depending on daemon HTTP listeners. Pure Python standard library only.
 """
+import atexit
 import datetime
 import glob
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import time
@@ -241,3 +243,69 @@ def toggle_host_audio_mute():
         pass
 
     return False
+
+
+_sleep_inhibit_proc = None
+
+
+def get_sleep_inhibit_status():
+    """Check if host sleep prevention inhibitor is currently active."""
+    global _sleep_inhibit_proc
+    return bool(_sleep_inhibit_proc and _sleep_inhibit_proc.poll() is None)
+
+
+def set_sleep_inhibit(enable: bool):
+    """Enable or disable systemd sleep/idle inhibitor lock."""
+    global _sleep_inhibit_proc
+    if enable:
+        if _sleep_inhibit_proc and _sleep_inhibit_proc.poll() is None:
+            return True
+        inhibit_bin = shutil.which("systemd-inhibit")
+        if not inhibit_bin:
+            return False
+
+        def preexec():
+            try:
+                import ctypes
+                libc = ctypes.CDLL("libc.so.6")
+                libc.prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+            except Exception:
+                pass
+
+        for what in ("sleep:idle:handle-lid-switch", "sleep:idle"):
+            try:
+                proc = subprocess.Popen(
+                    [
+                        inhibit_bin,
+                        f"--what={what}",
+                        "--who=Antigravity Remote",
+                        "--why=Prevent host suspend while remote gateway is active",
+                        "sleep",
+                        "infinity",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    preexec_fn=preexec,
+                )
+                time.sleep(0.05)
+                if proc.poll() is None:
+                    _sleep_inhibit_proc = proc
+                    return True
+            except Exception:
+                continue
+        return False
+    else:
+        if _sleep_inhibit_proc and _sleep_inhibit_proc.poll() is None:
+            try:
+                _sleep_inhibit_proc.terminate()
+                _sleep_inhibit_proc.wait(timeout=1.5)
+            except Exception:
+                try:
+                    _sleep_inhibit_proc.kill()
+                except Exception:
+                    pass
+        _sleep_inhibit_proc = None
+        return True
+
+
+atexit.register(lambda: set_sleep_inhibit(False))

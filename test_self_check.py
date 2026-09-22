@@ -17,6 +17,7 @@ from app.detector import (
     load_accounts,
 )
 from app.server import load_state
+from app.switcher import get_sleep_inhibit_status, set_sleep_inhibit
 
 
 def run_checks():
@@ -56,7 +57,16 @@ def run_checks():
     else:
         print("PASS: Host audio gracefully reports unsupported on non-audio system")
 
-    # 5. HTTP Endpoints & Auth FOUC-prevention check
+    # 5. Host sleep prevention inhibitor lifecycle check
+    ok_on = set_sleep_inhibit(True)
+    assert ok_on is True, "Failed to activate sleep inhibitor"
+    assert get_sleep_inhibit_status() is True, "Expected sleep inhibitor to report active"
+    ok_off = set_sleep_inhibit(False)
+    assert ok_off is True, "Failed to deactivate sleep inhibitor"
+    assert get_sleep_inhibit_status() is False, "Expected sleep inhibitor to report inactive"
+    print("PASS: Host sleep prevention inhibitor lifecycle verified")
+
+    # 6. HTTP Endpoints & Auth FOUC-prevention check
     import threading
     from http.server import ThreadingHTTPServer
     from app.server import DashboardHandler
@@ -92,13 +102,14 @@ def run_checks():
             assert "mrt=" in cookie, f"Expected Set-Cookie header with mrt token, got {cookie}"
         print("PASS: Authenticated GET /?token=... serves dashboard and sets cookie")
 
-        # D. GET /api/state includes audio telemetry
+        # D. GET /api/state includes audio & sleep telemetry
         req = urllib.request.Request(f"http://127.0.0.1:{test_port}/api/state", headers={"Cookie": f"mrt={token}"})
         with urllib.request.urlopen(req, timeout=3) as resp:
             state = json.loads(resp.read().decode("utf-8"))
             assert "audio" in state, "Missing audio in /api/state"
             assert state["audio"]["supported"] is True, "Audio should be supported on host"
-        print(f"PASS: /api/state telemetry includes audio: {state['audio']}")
+            assert "prevent_sleep" in state, "Missing prevent_sleep in /api/state"
+        print(f"PASS: /api/state telemetry includes audio and prevent_sleep ({state['prevent_sleep']})")
 
         # E. POST /api/audio/mute toggles mute state and returns updated audio
         req = urllib.request.Request(
@@ -123,7 +134,33 @@ def run_checks():
             data_restore = json.loads(resp.read().decode("utf-8"))
             restored_mute = data_restore["audio"]["muted"]
             assert restored_mute != toggled_mute, "Mute toggle did not flip back"
-        # F. Invalid token rejection check
+
+        # F. /api/sleep/toggle toggles keep-awake state and returns updated prevent_sleep
+        req_sleep = urllib.request.Request(
+            f"http://127.0.0.1:{test_port}/api/sleep/toggle",
+            data=b"{}",
+            headers={"Cookie": f"mrt={token}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req_sleep, timeout=3) as resp:
+            s_data = json.loads(resp.read().decode("utf-8"))
+            assert s_data.get("success") is True, f"Sleep toggle failed: {s_data}"
+            assert "prevent_sleep" in s_data, "Missing prevent_sleep in response"
+            toggled_sleep = s_data["prevent_sleep"]
+
+        # Restore original sleep state
+        req_sleep_restore = urllib.request.Request(
+            f"http://127.0.0.1:{test_port}/api/sleep/toggle",
+            data=b"{}",
+            headers={"Cookie": f"mrt={token}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req_sleep_restore, timeout=3) as resp:
+            s_restore = json.loads(resp.read().decode("utf-8"))
+            assert s_restore["prevent_sleep"] != toggled_sleep, "Sleep toggle did not flip back"
+        print("PASS: /api/sleep/toggle endpoint successfully toggles keep-awake state")
+
+        # G. Invalid token rejection check
         try:
             bad_req = urllib.request.Request(f"http://127.0.0.1:{test_port}/api/state", headers={"Cookie": "mrt=invalid_token_12345"})
             urllib.request.urlopen(bad_req, timeout=3)

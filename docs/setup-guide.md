@@ -95,10 +95,10 @@ All application settings are persisted in `state.json` in the root directory.
 
 ```json
 {
-  "mobile_token": "kRyxKoPlmIu76udnBKx2OORdYGwU5-q9",
+  "mobile_token": "your-random-token",
   "custom_domain": "remote.yourdomain.com",
   "tunnel_mode": "permanent",
-  "remote_url": ""
+  "prevent_sleep": true
 }
 ```
 
@@ -107,7 +107,7 @@ All application settings are persisted in `state.json` in the root directory.
 | `mobile_token` | `string` | *(Auto-generated)* | Cryptographically random secret token required to unlock the mobile dashboard. Can be customized. |
 | `custom_domain` | `string` | `""` | Your registered Cloudflare Zero Trust public hostname (e.g. `remote.yourdomain.com`). Used for permanent link generation. |
 | `tunnel_mode` | `string` | `"auto"` | Controls how the remote tunnel behaves. See mode table below. |
-| `remote_url` | `string` | `""` | Optional manual override for Google Account Chooser remote desktop session link. |
+| `prevent_sleep` | `boolean` | `true` | When `true`, prevents host OS auto-suspend and idle sleep while the server runs using Linux native `systemd-inhibit`. Toggleable from the mobile web UI. |
 
 ### Tunnel Modes (`tunnel_mode`)
 
@@ -141,6 +141,10 @@ python3 launcher.py --dual
 # Localhost only (no cloud tunnel)
 ./run.sh --local           # or -l
 python3 launcher.py --local
+
+# Sleep Prevention (Keep-Awake) controls
+python3 launcher.py --prevent-sleep  # Keep host awake (auto-suspend blocked)
+python3 launcher.py --allow-sleep    # Allow normal OS idle sleep/suspend
 
 # Display CLI help
 python3 launcher.py --help

@@ -19,6 +19,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
 from app.server import run_server
+from app.switcher import get_sleep_inhibit_status, set_sleep_inhibit
 
 STATE_PATH = os.path.join(BASE_DIR, "state.json")
 PORT = 8077
@@ -29,6 +30,7 @@ def cleanup_and_exit(signum=None, frame=None):
     """Gracefully terminate background tunnel and process on exit."""
     global tunnel_proc
     print("\n\033[93m[!] Shutting down Antigravity Remote...\033[0m", flush=True)
+    set_sleep_inhibit(False)
     if tunnel_proc and tunnel_proc.poll() is None:
         try:
             tunnel_proc.terminate()
@@ -120,12 +122,20 @@ Options:
   --permanent, -p         Force Cloudflare Zero Trust Permanent Named Tunnel
   --dual, -d              Run both Permanent Domain and Quick Tunnel simultaneously
   --local, -l             Localhost only (no public cloud tunnel)
+  --prevent-sleep         Keep host awake and block auto-suspend while running
+  --allow-sleep           Allow normal OS auto-suspend / sleep while running
   --help, -h              Show this help message
 """)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, cleanup_and_exit)
     signal.signal(signal.SIGTERM, cleanup_and_exit)
+
+    # Apply sleep inhibit CLI flags if specified
+    if "--allow-sleep" in args:
+        set_sleep_inhibit(False)
+    elif "--prevent-sleep" in args:
+        set_sleep_inhibit(True)
 
     # 1. Start Server in Background Thread
     print("\033[96m[*] Starting Antigravity Remote Server on port 8077...\033[0m", flush=True)
@@ -196,6 +206,8 @@ Options:
     print("\033[1;37m                 ANTIGRAVITY REMOTE - CONTROL CENTER\033[0m")
     print("\033[1;36m" + "=" * 74 + "\033[0m")
     print(f"  \033[1;32m[✓] Local Port     :\033[0m http://127.0.0.1:{PORT}")
+    sleep_disp = "\033[1;32mActive (Host auto-suspend blocked)\033[0m" if get_sleep_inhibit_status() else "\033[90mDisabled (Normal OS sleep)\033[0m"
+    print(f"  \033[1;32m[✓] Sleep Inhibit  :\033[0m {sleep_disp}")
 
     if mode == "dual" or (perm_url and quick_url):
         print(f"  \033[1;32m[✓] Permanent URL  :\033[0m {perm_url or 'Active (System Service)'}")

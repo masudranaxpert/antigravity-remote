@@ -11,6 +11,7 @@
 
 - **One-Tap Account Switcher**: Swap active Google accounts directly from your phone. Injects credentials into system keyring and restarts Antigravity cleanly.
 - **Authoritative Identity Detection**: Decodes Google OAuth JWT claims (`id_token`) on the fly to detect the active account with 100% accuracy.
+- **Host Sleep Prevention (Keep-Awake)**: Inhibits system auto-suspend and idle sleep via Linux native `systemd-inhibit` while the remote gateway runs. Toggle anytime from the mobile dashboard or `state.json`.
 - **Host PC Audio Telemetry & Remote Control**: Live master volume percentage detection and one-tap remote mute/unmute directly from your phone.
 - **Official Remote Gateway**: Generates one-tap Google Account Chooser remote desktop links with pre-authorized active credentials.
 - **Dual Quota Telemetry**: Clean, unnested tracking for Gemini and Claude with live countdown reset timers.
