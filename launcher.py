@@ -190,18 +190,6 @@ Options:
             print("\033[96m[*] Establishing Cloudflare Quick Tunnel (Auto fallback)...\033[0m", flush=True)
             tunnel_proc, quick_url = start_quick_tunnel(PORT)
 
-    # Update state.json with latest URLs
-    if quick_url:
-        st_data["quick_tunnel_url"] = quick_url
-        st_data["mobile_access_url"] = f"{quick_url}/?token={token}"
-    elif perm_url:
-        st_data["mobile_access_url"] = f"{perm_url}/?token={token}"
-    try:
-        with open(STATE_PATH, "w", encoding="utf-8") as f:
-            json.dump(st_data, f, indent=2)
-    except Exception:
-        pass
-
     # 3. Display Premium Terminal Dashboard Banner
     print("\033[2J\033[H", end="")  # Clear screen and move cursor to home
     print("\033[1;36m" + "=" * 74 + "\033[0m")
