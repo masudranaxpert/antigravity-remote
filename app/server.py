@@ -3,7 +3,8 @@
 Serves the mobile web dashboard and coordinates account switching using
 direct filesystem truth and Secret Service credentials.
 Features cryptographic device-bound session security (anti-cookie-theft),
-access audit logging in log/ip.json (30-day retention), and terminal killswitch.
+24-hour session lifetime, optional RFC 6238 TOTP 2FA, access audit logging
+in log/ip.json (30-day retention), and terminal killswitch.
 Pure Python standard library only.
 """
 import datetime
@@ -34,6 +35,12 @@ from app.switcher import (
     toggle_host_audio_mute,
 )
 from app.terminal import TerminalSession, compute_accept_key
+from app.totp import (
+    compute_totp,
+    generate_totp_secret,
+    get_totp_uri,
+    verify_totp,
+)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -41,6 +48,7 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 STATE_PATH = os.path.join(BASE_DIR, "state.json")
 STATIC_PATH = os.path.join(BASE_DIR, "static.json")
 DEFAULT_PORT = 8077
+SESSION_MAX_AGE = 86400  # 24-hour session lifetime in seconds
 
 
 def load_state():
@@ -78,6 +86,12 @@ def load_state():
         updated = True
     if "terminal_enabled" not in data:
         data["terminal_enabled"] = True
+        updated = True
+    if "totp_enabled" not in data:
+        data["totp_enabled"] = False
+        updated = True
+    if not data.get("totp_secret"):
+        data["totp_secret"] = generate_totp_secret()
         updated = True
 
     if updated:
@@ -119,7 +133,7 @@ def generate_session_token(master_token: str, fingerprint: str) -> str:
 
 
 def verify_session_token(token_str: str, master_token: str, current_fingerprint: str) -> tuple:
-    """Verify session token signature, expiration (30 days), and device binding."""
+    """Verify session token signature, 24-hour expiration, and device binding."""
     if not token_str:
         return False, "missing_token"
 
@@ -137,8 +151,8 @@ def verify_session_token(token_str: str, master_token: str, current_fingerprint:
     except ValueError:
         return False, "invalid_timestamp"
 
-    # Expire after 30 days
-    if time.time() - epoch > 30 * 86400:
+    # Enforce strict 24-hour session lifetime
+    if time.time() - epoch > SESSION_MAX_AGE:
         return False, "session_expired"
 
     # Verify HMAC signature against master secret
@@ -157,10 +171,10 @@ def verify_session_token(token_str: str, master_token: str, current_fingerprint:
 class DashboardHandler(BaseHTTPRequestHandler):
     """HTTP request router for the mobile dashboard and direct API."""
 
-    server_version = "AGRemote/3.1"
+    server_version = "AGRemote/3.2"
 
     def is_authenticated(self):
-        """Verify request authenticity via constant-time token comparison and device binding."""
+        """Verify request authenticity via constant-time token comparison, device binding, and 2FA."""
         st = load_state()
         master_token = st.get("mobile_token", "")
         if not master_token:
@@ -174,8 +188,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
         query = parse_qs(urlparse(self.path).query)
         token_param = query.get("token", [""])[0]
         if token_param and hmac.compare_digest(token_param, master_token):
-            session_cookie = generate_session_token(master_token, current_fp)
-            return True, st, session_cookie, "query_master_token"
+            # Check if 2FA (TOTP) is enforced
+            if st.get("totp_enabled", False):
+                otp_param = query.get("otp", [""])[0]
+                if otp_param and verify_totp(st.get("totp_secret", ""), otp_param):
+                    session_cookie = generate_session_token(master_token, current_fp)
+                    return True, st, session_cookie, "query_token_and_totp"
+                else:
+                    return False, st, None, "totp_required"
+            else:
+                session_cookie = generate_session_token(master_token, current_fp)
+                return True, st, session_cookie, "query_master_token"
 
         # 2. Device-bound session cookie
         cookie_header = self.headers.get("Cookie", "")
@@ -218,7 +241,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             pass
 
     def send_file(self, file_path, content_type, set_cookie_token=None):
-        """Read and transmit a local file with proper MIME headers and security flags."""
+        """Read and transmit a local file with proper MIME headers and 24h security flags."""
         if not os.path.exists(file_path):
             self.send_response(404)
             self.end_headers()
@@ -235,7 +258,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if set_cookie_token:
                 self.send_header(
                     "Set-Cookie",
-                    f"mrt={set_cookie_token}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax",
+                    f"mrt={set_cookie_token}; Path=/; Max-Age={SESSION_MAX_AGE}; HttpOnly; SameSite=Lax",
                 )
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
@@ -274,6 +297,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif safe_path.endswith(".js"):
                 ctype = "application/javascript; charset=utf-8"
             return self.send_file(safe_path, ctype or "application/octet-stream")
+
+        if path == "/api/auth/status":
+            st = load_state()
+            return self.send_json({
+                "totp_enabled": bool(st.get("totp_enabled", False)),
+            })
 
         if path == "/":
             authed, st, new_cookie, reason = self.is_authenticated()
@@ -384,6 +413,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "audio": get_host_audio_status(),
                 "prevent_sleep": get_sleep_inhibit_status(),
                 "terminal_enabled": bool(st.get("terminal_enabled", True)),
+                "totp_enabled": bool(st.get("totp_enabled", False)),
             })
 
         if path == "/api/audit/logs":
@@ -395,12 +425,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_json({"error": "not_found"}, 404)
 
     def do_POST(self):
-        """Route POST mutations for account switching and remote configuration."""
+        """Route POST mutations for account switching, authentication, and remote configuration."""
         path = urlparse(self.path).path
-        authed, st, _, reason = self.is_authenticated()
-        if not authed:
-            record_client_access(self.headers, self.client_address, path, "POST", 401, False, reason)
-            return self.send_json({"error": "unauthorized"}, 401)
 
         try:
             length = int(self.headers.get("Content-Length", 0))
@@ -409,6 +435,73 @@ class DashboardHandler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
         except Exception:
             body = {}
+
+        # Public 2FA / Login Verification Endpoint
+        if path == "/api/auth/verify":
+            st = load_state()
+            token = body.get("token", "").strip()
+            otp = body.get("otp", "").strip()
+            master_token = st.get("mobile_token", "")
+
+            if not token or not hmac.compare_digest(token, master_token):
+                record_client_access(self.headers, self.client_address, path, "POST", 401, False, "invalid_master_token")
+                return self.send_json({"success": False, "error": "Invalid authorization token."}, 401)
+
+            if st.get("totp_enabled", False):
+                secret = st.get("totp_secret", "")
+                if not otp or not verify_totp(secret, otp):
+                    record_client_access(self.headers, self.client_address, path, "POST", 401, False, "invalid_totp_code")
+                    return self.send_json({"success": False, "error": "Invalid 6-digit Authenticator code."}, 401)
+
+            current_fp = compute_client_fingerprint(self.headers)
+            session_cookie = generate_session_token(master_token, current_fp)
+            record_client_access(self.headers, self.client_address, path, "POST", 200, True, "login_success")
+
+            data = json.dumps({"success": True, "token": session_cookie}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header(
+                "Set-Cookie",
+                f"mrt={session_cookie}; Path=/; Max-Age={SESSION_MAX_AGE}; HttpOnly; SameSite=Lax",
+            )
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
+        authed, st, _, reason = self.is_authenticated()
+        if not authed:
+            record_client_access(self.headers, self.client_address, path, "POST", 401, False, reason)
+            return self.send_json({"error": "unauthorized"}, 401)
+
+        if path == "/api/totp/setup":
+            secret = st.get("totp_secret", "")
+            if not secret:
+                secret = generate_totp_secret()
+                st["totp_secret"] = secret
+                save_state(st)
+            uri = get_totp_uri(secret, issuer="Antigravity Remote", account_name="masud")
+            return self.send_json({
+                "enabled": bool(st.get("totp_enabled", False)),
+                "secret": secret,
+                "uri": uri,
+            })
+
+        if path == "/api/totp/toggle":
+            enable = bool(body.get("enable", False))
+            if enable:
+                otp = body.get("otp", "").strip()
+                secret = st.get("totp_secret", "")
+                if not verify_totp(secret, otp):
+                    return self.send_json({"success": False, "error": "Invalid code. Please check your Authenticator app."}, 400)
+            st["totp_enabled"] = enable
+            save_state(st)
+            record_client_access(self.headers, self.client_address, path, "POST", 200, True, f"totp_toggled_{enable}")
+            return self.send_json({
+                "success": True,
+                "totp_enabled": enable,
+            })
 
         if path == "/api/switch":
             account_id = body.get("account_id", "").strip()

@@ -124,12 +124,83 @@ Options:
   --local, -l             Localhost only (no public cloud tunnel)
   --prevent-sleep         Keep host awake and block auto-suspend while running
   --allow-sleep           Allow normal OS auto-suspend / sleep while running
+  --setup-totp            Configure Google / Microsoft Authenticator 2FA interactively
+  --enable-totp           Enable 2FA Authenticator requirement
+  --disable-totp          Disable 2FA Authenticator requirement
   --help, -h              Show this help message
 """)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, cleanup_and_exit)
     signal.signal(signal.SIGTERM, cleanup_and_exit)
+
+    # 2-Factor Authentication (TOTP) CLI management
+    if any(a in args for a in ("--setup-totp", "--enable-totp", "--disable-totp")):
+        from app.totp import compute_totp, generate_totp_secret, get_totp_uri, verify_totp
+
+        st = {}
+        if os.path.exists(STATE_PATH):
+            try:
+                with open(STATE_PATH, "r", encoding="utf-8") as f:
+                    st = json.load(f)
+            except Exception:
+                pass
+
+        if "--disable-totp" in args:
+            st["totp_enabled"] = False
+            with open(STATE_PATH, "w", encoding="utf-8") as f:
+                json.dump(st, f, indent=2)
+            os.chmod(STATE_PATH, 0o600)
+            print("\033[92m[✓] 2-Factor Authentication (TOTP) has been DISABLED.\033[0m")
+            sys.exit(0)
+
+        if "--enable-totp" in args and "--setup-totp" not in args:
+            if not st.get("totp_secret"):
+                print("\033[93m[!] No TOTP secret configured yet. Running interactive setup...\033[0m")
+            else:
+                st["totp_enabled"] = True
+                with open(STATE_PATH, "w", encoding="utf-8") as f:
+                    json.dump(st, f, indent=2)
+                os.chmod(STATE_PATH, 0o600)
+                print("\033[92m[✓] 2-Factor Authentication (TOTP) is now ACTIVE.\033[0m")
+                sys.exit(0)
+
+        # Interactive setup
+        secret = st.get("totp_secret")
+        if not secret:
+            secret = generate_totp_secret()
+            st["totp_secret"] = secret
+
+        uri = get_totp_uri(secret, account_name="masud", issuer="Antigravity Remote")
+        formatted_secret = " ".join([secret[i:i+4] for i in range(0, len(secret), 4)])
+
+        print("\033[1;36m" + "=" * 68 + "\033[0m")
+        print("\033[1;37m        ANTIGRAVITY REMOTE - 2FA AUTHENTICATOR SETUP\033[0m")
+        print("\033[1;36m" + "=" * 68 + "\033[0m")
+        print("  Add this secret key into Google Authenticator or Microsoft Authenticator:")
+        print(f"\n  \033[1;33mSecret Key (Base32):\033[0m \033[1;32m{formatted_secret}\033[0m")
+        print(f"  \033[1;33mRaw Secret:\033[0m          \033[1;37m{secret}\033[0m\n")
+        print(f"  \033[1;33mOtpauth URI:\033[0m\n  {uri}\n")
+        print("  \033[90mTip: In Google Authenticator, tap '+' -> 'Enter a setup key'.\033[0m")
+        print("  \033[90mAccount Name: Antigravity Remote | Key Type: Time-based\033[0m")
+        print("\033[1;36m" + "-" * 68 + "\033[0m")
+
+        try:
+            code = input("Enter 6-digit code shown in your Authenticator app: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nSetup cancelled.")
+            sys.exit(0)
+
+        if verify_totp(secret, code):
+            st["totp_enabled"] = True
+            with open(STATE_PATH, "w", encoding="utf-8") as f:
+                json.dump(st, f, indent=2)
+            os.chmod(STATE_PATH, 0o600)
+            print("\n\033[1;32m[✓] Code verified successfully! 2FA TOTP is now ENABLED.\033[0m")
+        else:
+            current = compute_totp(secret)
+            print(f"\n\033[91m[✗] Invalid verification code (Current expected: {current}). Setup aborted.\033[0m")
+        sys.exit(0)
 
     # Apply sleep inhibit CLI flags if specified
     if "--allow-sleep" in args:
@@ -230,6 +301,9 @@ Options:
     term_on = bool(st_data.get("terminal_enabled", True))
     term_disp = "\033[1;32mEnabled (Interactive Shell Online)\033[0m" if term_on else "\033[91mDisabled (Access Blocked)\033[0m"
     print(f"  \033[1;32m[✓] Web Terminal   :\033[0m {term_disp}")
+    totp_on = bool(st_data.get("totp_enabled", False))
+    totp_disp = "\033[1;32mActive (Google / Microsoft Authenticator)\033[0m" if totp_on else "\033[90mDisabled (Optional)\033[0m"
+    print(f"  \033[1;32m[✓] 2-Factor Auth   :\033[0m {totp_disp}")
 
     if mode == "dual" or (perm_url and quick_url):
         print(f"  \033[1;32m[✓] Permanent URL  :\033[0m {perm_url or 'Active (System Service)'}")

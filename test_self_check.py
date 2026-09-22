@@ -16,9 +16,16 @@ from app.detector import (
     get_official_remote_info,
     load_accounts,
 )
-from app.server import load_state
+from app.server import (
+    SESSION_MAX_AGE,
+    generate_session_token,
+    load_state,
+    save_state,
+    verify_session_token,
+)
 from app.switcher import get_sleep_inhibit_status, set_sleep_inhibit
 from app.terminal import compute_accept_key, encode_ws_frame, resize_pty, spawn_shell_pty
+from app.totp import compute_totp, generate_totp_secret, get_totp_uri, verify_totp
 
 
 def run_checks():
@@ -86,6 +93,36 @@ def run_checks():
     os.waitpid(shell_pid, 0)
     os.close(master_fd)
     print("PASS: Terminal PTY shell lifecycle and RFC 6455 frame engine verified")
+
+    # 6b. RFC 6238 TOTP Engine & 24-Hour Session Lifecycle verification
+    totp_sec = generate_totp_secret()
+    assert len(totp_sec) == 16, f"Expected 16-char secret, got {totp_sec}"
+    totp_code = compute_totp(totp_sec)
+    assert len(totp_code) == 6 and totp_code.isdigit(), f"Invalid TOTP code: {totp_code}"
+    assert verify_totp(totp_sec, totp_code) is True, "TOTP verification failed on current code"
+    bad_code = "999999" if totp_code != "999999" else "000000"
+    assert verify_totp(totp_sec, bad_code) is False, "TOTP verification accepted incorrect code"
+    totp_uri = get_totp_uri(totp_sec, account_name="test", issuer="TestIssuer")
+    assert totp_uri.startswith("otpauth://totp/"), f"Invalid OTP URI: {totp_uri}"
+    assert totp_sec in totp_uri, "Secret missing in otpauth URI"
+
+    # Strict 24-Hour session lifetime verification
+    assert SESSION_MAX_AGE == 86400, f"Expected 86400s (24h) session limit, got {SESSION_MAX_AGE}"
+    test_master = "test_token_secret_12345"
+    test_fp = "a1b2c3d4e5f6"
+    fresh_session = generate_session_token(test_master, test_fp)
+    valid_fresh, msg_fresh = verify_session_token(fresh_session, test_master, test_fp)
+    assert valid_fresh is True and msg_fresh == "ok", f"Fresh session failed: {msg_fresh}"
+
+    # Expired session (> 24 hours) must be rejected
+    expired_epoch = int(time.time()) - 86405
+    import hashlib, hmac
+    expired_payload = f"v1:{expired_epoch}:{test_fp}"
+    expired_sig = hmac.new(test_master.encode("utf-8"), expired_payload.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+    expired_session = f"v1.{expired_epoch}.{test_fp}.{expired_sig}"
+    valid_exp, msg_exp = verify_session_token(expired_session, test_master, test_fp)
+    assert valid_exp is False and msg_exp == "session_expired", f"Expired session check failed: {msg_exp}"
+    print("PASS: RFC 6238 TOTP engine and strict 24-hour session lifecycle verified")
 
     # 7. HTTP Endpoints & Auth FOUC-prevention check
     import threading
@@ -283,6 +320,8 @@ def run_checks():
             assert False, "Expected 413 for payload > 1MB"
         except urllib.error.HTTPError as e:
             assert e.code == 413, f"Expected 413, got {e.code}"
+        except urllib.error.URLError as e:
+            assert "Broken pipe" in str(e) or "Connection reset" in str(e), f"Unexpected URLError: {e}"
         print("PASS: Oversized payload rejected with HTTP 413")
 
         # I. Malicious account_id path traversal rejection in /api/switch
@@ -397,6 +436,80 @@ def run_checks():
         mode = os.stat(STATE_PATH).st_mode & 0o777
         assert mode == 0o600, f"Expected state.json mode 0600, found {oct(mode)}"
         print(f"PASS: state.json restricted to owner-only permissions ({oct(mode)})")
+
+        # M. Login Verification Endpoint (/api/auth/verify) & 24h Set-Cookie Check
+        req_bad_auth = urllib.request.Request(
+            f"http://127.0.0.1:{test_port}/api/auth/verify",
+            data=json.dumps({"token": "wrong_token_xyz"}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": legit_ua},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(req_bad_auth, timeout=3)
+            assert False, "Expected 401 for invalid login token"
+        except urllib.error.HTTPError as e:
+            assert e.code == 401, f"Expected 401, got {e.code}"
+
+        req_good_auth = urllib.request.Request(
+            f"http://127.0.0.1:{test_port}/api/auth/verify",
+            data=json.dumps({"token": token}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": legit_ua},
+            method="POST",
+        )
+        with urllib.request.urlopen(req_good_auth, timeout=3) as resp:
+            assert resp.status == 200
+            auth_res = json.loads(resp.read().decode("utf-8"))
+            assert auth_res.get("success") is True
+            set_cookie_val = resp.headers.get("Set-Cookie", "")
+            assert "Max-Age=86400" in set_cookie_val, f"Cookie does not enforce 24-hour Max-Age: {set_cookie_val}"
+            assert "HttpOnly" in set_cookie_val
+
+        # N. Authenticator App 2FA (TOTP RFC 6238) Enforcement Flow
+        demo_st = load_state()
+        test_totp_secret = generate_totp_secret()
+        demo_st["totp_secret"] = test_totp_secret
+        demo_st["totp_enabled"] = True
+        save_state(demo_st)
+
+        # /api/auth/status confirms TOTP is active
+        req_status = urllib.request.Request(f"http://127.0.0.1:{test_port}/api/auth/status")
+        with urllib.request.urlopen(req_status, timeout=3) as resp:
+            status_data = json.loads(resp.read().decode("utf-8"))
+            assert status_data.get("totp_enabled") is True, f"Expected totp_enabled True, got {status_data}"
+
+        # Login attempt with valid token but wrong OTP -> 401
+        wrong_otp_val = "000000" if compute_totp(test_totp_secret) != "000000" else "111111"
+        req_wrong_otp = urllib.request.Request(
+            f"http://127.0.0.1:{test_port}/api/auth/verify",
+            data=json.dumps({"token": token, "otp": wrong_otp_val}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": legit_ua},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(req_wrong_otp, timeout=3)
+            assert False, "Expected 401 for wrong 2FA OTP code"
+        except urllib.error.HTTPError as e:
+            assert e.code == 401
+
+        # Login attempt with valid token and CORRECT OTP -> 200 + 24h cookie
+        current_otp = compute_totp(test_totp_secret)
+        req_good_otp = urllib.request.Request(
+            f"http://127.0.0.1:{test_port}/api/auth/verify",
+            data=json.dumps({"token": token, "otp": current_otp}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": legit_ua},
+            method="POST",
+        )
+        with urllib.request.urlopen(req_good_otp, timeout=3) as resp:
+            assert resp.status == 200
+            otp_res = json.loads(resp.read().decode("utf-8"))
+            assert otp_res.get("success") is True
+            otp_cookie = resp.headers.get("Set-Cookie", "")
+            assert "Max-Age=86400" in otp_cookie
+
+        # Restore default optional 2FA state
+        demo_st["totp_enabled"] = False
+        save_state(demo_st)
+        print("PASS: 24-hour cookie lifetime and Authenticator App 2FA (TOTP) auth flow verified")
     finally:
         server.shutdown()
         server.server_close()

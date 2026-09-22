@@ -73,9 +73,15 @@
       outline: none;
       text-align: center;
       transition: border-color 0.15s ease;
+      box-sizing: border-box;
     }
     .auth-token-field:focus {
       border-color: var(--gemini-accent);
+    }
+    .otp-field {
+      letter-spacing: 0.25em;
+      font-size: 18px;
+      font-weight: 700;
     }
     .auth-submit-btn {
       width: 100%;
@@ -89,6 +95,7 @@
       cursor: pointer;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
       transition: background-color 0.15s ease, transform 0.1s ease;
+      margin-top: 4px;
     }
     .auth-submit-btn:hover {
       background-color: var(--primary-hover);
@@ -97,10 +104,21 @@
     .auth-submit-btn:active {
       transform: translateY(0);
     }
+    .auth-error-msg {
+      display: none;
+      color: #f87171;
+      font-size: 12.5px;
+      background: rgba(248, 113, 113, 0.12);
+      border: 1px solid rgba(248, 113, 113, 0.3);
+      border-radius: var(--radius-sm);
+      padding: 8px 12px;
+      margin-bottom: 8px;
+      text-align: center;
+    }
     .auth-note {
       font-size: 11.5px;
       color: var(--text-tertiary);
-      margin-top: 14px;
+      margin-top: 16px;
       line-height: 1.4;
     }
   </style>
@@ -112,8 +130,10 @@
         <img src="/static/icon.png" alt="Antigravity Logo">
       </div>
       <h1 class="auth-heading">Antigravity Remote</h1>
-      <p class="auth-subtext">Enter your mobile authorization token or open the authenticated tunnel link from host PC.</p>
+      <p class="auth-subtext" id="auth-subtext">Enter your mobile authorization token to unlock your 24-hour session.</p>
       
+      <div id="auth-error" class="auth-error-msg"></div>
+
       <form class="auth-form" id="login-form" onsubmit="handleAuthSubmit(event)">
         <input 
           id="auth-token-input" 
@@ -121,24 +141,104 @@
           type="password" 
           placeholder="Paste mobile token" 
           autocomplete="current-password"
-          required
-          autofocus>
-        <button type="submit" class="auth-submit-btn">Unlock Dashboard</button>
+          required>
+          
+        <div id="otp-container" style="display: none;">
+          <input 
+            id="auth-otp-input" 
+            class="auth-token-field otp-field" 
+            type="text" 
+            inputmode="numeric" 
+            pattern="[0-9]*" 
+            maxlength="6" 
+            placeholder="000000" 
+            autocomplete="one-time-code">
+          <p style="font-size: 11.5px; color: var(--text-secondary); margin-top: 6px; margin-bottom: 4px;">Enter 6-digit code from Google / Microsoft Authenticator</p>
+        </div>
+
+        <button type="submit" id="auth-btn" class="auth-submit-btn">Unlock Dashboard</button>
       </form>
 
-      <p class="auth-note">Token is generated securely on host startup and printed in the desktop terminal.</p>
+      <p class="auth-note">Sessions expire automatically after 24 hours. Token is printed in the desktop terminal.</p>
     </div>
   </div>
 
   <script>
-    function handleAuthSubmit(e) {
+    (async function initAuth() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const queryToken = urlParams.get('token');
+      const tokenInput = document.getElementById('auth-token-input');
+      const otpContainer = document.getElementById('otp-container');
+      const otpInput = document.getElementById('auth-otp-input');
+      const subtext = document.getElementById('auth-subtext');
+
+      if (queryToken) {
+        tokenInput.value = queryToken;
+      }
+
+      // Check if 2FA (TOTP) is active on the server
+      try {
+        const resp = await fetch('/api/auth/status');
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.totp_enabled) {
+            otpContainer.style.display = 'block';
+            otpInput.required = true;
+            if (queryToken) {
+              tokenInput.style.display = 'none';
+              subtext.textContent = '2-Factor Authentication active. Enter the 6-digit code from your Authenticator app.';
+              setTimeout(() => otpInput.focus(), 100);
+            } else {
+              subtext.textContent = 'Enter your token and 6-digit Authenticator code.';
+            }
+          }
+        }
+      } catch (_) {}
+
+      if (!queryToken) {
+        tokenInput.focus();
+      }
+    })();
+
+    async function handleAuthSubmit(e) {
       if (e) e.preventDefault();
-      const input = document.getElementById('auth-token-input');
-      const token = input.value.trim();
+      const tokenInput = document.getElementById('auth-token-input');
+      const otpInput = document.getElementById('auth-otp-input');
+      const errorBox = document.getElementById('auth-error');
+      const btn = document.getElementById('auth-btn');
+
+      const token = tokenInput.value.trim();
+      const otp = otpInput ? otpInput.value.trim() : '';
+
       if (!token) return;
 
-      document.cookie = 'mrt=' + encodeURIComponent(token) + ';max-age=31536000;path=/;SameSite=Lax';
-      window.location.href = window.location.pathname;
+      errorBox.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'Verifying...';
+
+      try {
+        const resp = await fetch('/api/auth/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, otp }),
+        });
+
+        const res = await resp.json();
+        if (resp.ok && res.success) {
+          // Clean token from address bar and reload to dashboard
+          window.location.href = window.location.pathname;
+        } else {
+          errorBox.textContent = res.error || 'Authentication failed. Please check your credentials.';
+          errorBox.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = 'Unlock Dashboard';
+        }
+      } catch (err) {
+        errorBox.textContent = 'Connection error: ' + err.message;
+        errorBox.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Unlock Dashboard';
+      }
     }
   </script>
 </body>
