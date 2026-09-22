@@ -78,63 +78,79 @@ def main():
         print("\033[91m[✗] Failed to start local server on port 8077.\033[0m", file=sys.stderr)
         sys.exit(1)
 
-    # 2. Boot Cloudflare Quick Tunnel
-    print("\033[96m[*] Establishing Cloudflare Quick Tunnel...\033[0m", flush=True)
-    cloudflared_bin = os.path.expanduser("~/.local/bin/cloudflared")
-    if not os.path.exists(cloudflared_bin):
-        cloudflared_bin = "cloudflared"
-
-    cmd = [
-        cloudflared_bin,
-        "tunnel",
-        "--no-autoupdate",
-        "--url",
-        f"http://127.0.0.1:{PORT}",
-    ]
-
-    try:
-        tunnel_proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-    except Exception as e:
-        print(f"\033[91m[✗] Failed to launch cloudflared: {e}\033[0m", file=sys.stderr)
-        cleanup_and_exit()
-
-    # 3. Capture Tunnel URL from stream
-    tunnel_url = None
+    # 2. Check for Permanent Cloudflare System Service Tunnel
     token = load_token()
-    url_pattern = re.compile(r"https://[-a-z0-9.]+\.trycloudflare\.com")
-
-    for line in tunnel_proc.stdout:
-        m = url_pattern.search(line)
-        if m:
-            tunnel_url = m.group(0)
-            break
-        if "error" in line.lower() and "failed" in line.lower():
-            print(f"\033[93m[cloudflared]\033[0m {line.strip()}", flush=True)
-
-    if not tunnel_url:
-        print("\033[91m[✗] Could not resolve Cloudflare Tunnel URL.\033[0m", file=sys.stderr)
-        cleanup_and_exit()
-
-    mobile_access_url = f"{tunnel_url}/?token={token}" if token else tunnel_url
-
-    # Save active tunnel URL to state.json for programmatic access
+    is_service_active = False
     try:
-        st_data = {}
-        if os.path.exists(STATE_PATH):
-            with open(STATE_PATH, "r", encoding="utf-8") as f:
-                st_data = json.load(f)
-        st_data["tunnel_url"] = tunnel_url
-        st_data["mobile_access_url"] = mobile_access_url
-        with open(STATE_PATH, "w", encoding="utf-8") as f:
-            json.dump(st_data, f, indent=2)
+        chk = subprocess.run(["systemctl", "is-active", "cloudflared"], capture_output=True, text=True, timeout=2)
+        is_service_active = (chk.stdout.strip() == "active")
     except Exception:
         pass
+
+    st_data = {}
+    if os.path.exists(STATE_PATH):
+        try:
+            with open(STATE_PATH, "r", encoding="utf-8") as f:
+                st_data = json.load(f)
+        except Exception:
+            pass
+
+    custom_domain = st_data.get("custom_domain", "").strip()
+
+    if is_service_active:
+        print("\033[92m[✓] Detected active Cloudflare Zero Trust permanent system service.\033[0m", flush=True)
+        tunnel_url = f"https://{custom_domain}" if custom_domain else "Cloudflare Zero Trust (Permanent Domain)"
+        mobile_access_url = f"https://{custom_domain}/?token={token}" if custom_domain else f"(Configure custom_domain in state.json) Token: {token}"
+    else:
+        # Boot Cloudflare Quick Tunnel Fallback
+        print("\033[96m[*] Establishing Cloudflare Quick Tunnel...\033[0m", flush=True)
+        cloudflared_bin = "/usr/local/bin/cloudflared" if os.path.exists("/usr/local/bin/cloudflared") else os.path.expanduser("~/.local/bin/cloudflared")
+        if not os.path.exists(cloudflared_bin):
+            cloudflared_bin = "cloudflared"
+
+        cmd = [
+            cloudflared_bin,
+            "tunnel",
+            "--no-autoupdate",
+            "--url",
+            f"http://127.0.0.1:{PORT}",
+        ]
+
+        try:
+            tunnel_proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+        except Exception as e:
+            print(f"\033[91m[✗] Failed to launch cloudflared: {e}\033[0m", file=sys.stderr)
+            cleanup_and_exit()
+
+        tunnel_url = None
+        url_pattern = re.compile(r"https://[-a-z0-9.]+\.trycloudflare\.com")
+
+        for line in tunnel_proc.stdout:
+            m = url_pattern.search(line)
+            if m:
+                tunnel_url = m.group(0)
+                break
+            if "error" in line.lower() and "failed" in line.lower():
+                print(f"\033[93m[cloudflared]\033[0m {line.strip()}", flush=True)
+
+        if not tunnel_url:
+            print("\033[91m[✗] Could not resolve Cloudflare Tunnel URL.\033[0m", file=sys.stderr)
+            cleanup_and_exit()
+
+        mobile_access_url = f"{tunnel_url}/?token={token}" if token else tunnel_url
+        st_data["tunnel_url"] = tunnel_url
+        st_data["mobile_access_url"] = mobile_access_url
+        try:
+            with open(STATE_PATH, "w", encoding="utf-8") as f:
+                json.dump(st_data, f, indent=2)
+        except Exception:
+            pass
 
     # 4. Display Premium Terminal Dashboard Banner
     print("\033[2J\033[H", end="")  # Clear screen and move cursor to home
@@ -156,7 +172,7 @@ def main():
     # 5. Keep main thread alive and monitor processes
     try:
         while True:
-            if tunnel_proc.poll() is not None:
+            if tunnel_proc and tunnel_proc.poll() is not None:
                 print("\033[91m[!] Cloudflare Tunnel disconnected unexpectedly.\033[0m", flush=True)
                 break
             time.sleep(1)
