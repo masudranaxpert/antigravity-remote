@@ -1,0 +1,16 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local sensitive runtime state
+state.json
+*.tmp
+*.log
+
+# Editor directories and desktop artifacts
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0d0f12">
+  <title>Antigravity Mobile Switcher</title>
+  <link rel="icon" type="image/png" href="/static/icon.png">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <!-- Top Floating Notification HUD -->
+  <aside id="toast" role="alert" aria-live="assertive">
+    <div id="toast-icon" aria-hidden="true"></div>
+    <span id="toast-msg"></span>
+  </aside>
+
+  <div class="dashboard-container">
+    <!-- Top Studio Header -->
+    <header class="studio-header">
+      <div class="brand-group">
+        <div class="brand-logo" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+        </div>
+        <div class="brand-info">
+          <div class="brand-title">
+            <span>ANTIGRAVITY</span>
+            <span class="brand-tag">MOBILE</span>
+          </div>
+          <div class="brand-subtitle" id="sync-time">Connecting to host...</div>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="host-pill" id="host-status-pill">
+          <span class="status-dot" id="pc-dot"></span>
+          <span id="pc-status-text">Checking PC...</span>
+        </div>
+        <button id="refresh-btn" class="icon-action-btn" title="Refresh Live State" aria-label="Refresh Live State">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Dynamic Application Container -->
+    <main id="app">
+      <!-- Top Responsive Hero Row (Side-by-side on PC, stacked on mobile) -->
+      <div class="top-hero-row">
+        <!-- Active Host Deck -->
+        <section id="hero-deck-wrap" class="hero-deck-container" aria-label="Active Account on Host PC"></section>
+
+        <!-- Official Remote Session Gateway -->
+        <section class="gateway-card" id="remote-section" aria-label="Official Remote Control">
+          <div class="gateway-main">
+            <div class="gateway-info">
+              <div class="gateway-tag">OFFICIAL REMOTE DESKTOP</div>
+              <h2 class="gateway-heading" id="gateway-device-name">Host Remote Session</h2>
+              <p class="gateway-desc" id="gateway-desc-text">Direct secure WebChannel link with active Google credentials.</p>
+            </div>
+            <div id="remote-action-wrap" class="gateway-actions">
+              <!-- Populated dynamically by app.js -->
+            </div>
+          </div>
+
+          <!-- Collapsible Link Override Drawer -->
+          <div class="gateway-footer">
+            <button type="button" class="drawer-toggle-btn" id="toggle-drawer-btn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="3" r="1"></circle>
+                <circle cx="19" cy="12" r="1"></circle>
+                <circle cx="5" cy="12" r="1"></circle>
+                <circle cx="12" cy="21" r="1"></circle>
+              </svg>
+              <span>Custom Remote URL</span>
+            </button>
+            <div id="remote-drawer" class="remote-drawer">
+              <div class="drawer-input-row">
+                <input id="remote-input" type="url" placeholder="Paste custom Antigravity remote URL" autocomplete="off" spellcheck="false">
+                <button id="save-remote-btn" class="drawer-save-btn">Save</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Available Accounts Section -->
+      <section class="accounts-section">
+        <div class="section-head">
+          <div class="section-title-group">
+            <h3 class="section-heading">Available Accounts</h3>
+            <span class="counter-badge" id="accounts-count">0</span>
+          </div>
+          <div class="section-caption">Select an account to hot-swap credentials on host machine</div>
+        </div>
+        <div class="accounts-grid" id="accounts-grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Switch Confirmation Dialog -->
+  <dialog id="switch-modal" class="modal-backdrop" aria-labelledby="modal-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-icon-badge" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 2.1l4 4-4 4"></path>
+            <path d="M3 12.2v-2a4 4 0 0 1 4-4h14"></path>
+            <path d="M7 21.9l-4-4 4-4"></path>
+            <path d="M21 11.8v2a4 4 0 0 1-4 4H3"></path>
+          </svg>
+        </div>
+        <div>
+          <h3 class="modal-title" id="modal-title">Switch Host Account</h3>
+          <p class="modal-subtitle">Antigravity desktop process will restart with new credentials.</p>
+        </div>
+      </div>
+      <div class="modal-target-box">
+        <span class="modal-target-label">Target Account</span>
+        <span id="modal-target-email" class="modal-target-email"></span>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" id="modal-cancel-btn">Cancel</button>
+        <button type="button" class="btn-confirm" id="modal-confirm-btn">Confirm Switch</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
