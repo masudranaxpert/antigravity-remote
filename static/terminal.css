@@ -159,6 +159,15 @@ html, body {
   transform: scale(0.96);
 }
 
+.logout-tool-btn {
+  text-decoration: none;
+}
+
+.logout-tool-btn:hover {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
 /* Quick Commands Bar */
 .quick-commands-bar {
   display: flex;

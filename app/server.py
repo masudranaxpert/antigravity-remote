@@ -304,6 +304,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "totp_enabled": bool(st.get("totp_enabled", False)),
             })
 
+        if path == "/logout":
+            record_client_access(self.headers, self.client_address, path, "GET", 302, True, "user_logout")
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.send_header(
+                "Set-Cookie",
+                "mrt=deleted; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax",
+            )
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.end_headers()
+            return
+
         if path == "/":
             authed, st, new_cookie, reason = self.is_authenticated()
             record_client_access(
@@ -466,6 +478,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 f"mrt={session_cookie}; Path=/; Max-Age={SESSION_MAX_AGE}; HttpOnly; SameSite=Lax",
             )
             self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
+        if path == "/api/auth/logout":
+            record_client_access(self.headers, self.client_address, path, "POST", 200, True, "user_logout_api")
+            data = json.dumps({"success": True}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header(
+                "Set-Cookie",
+                "mrt=deleted; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax",
+            )
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
             self.end_headers()
             self.wfile.write(data)
             return

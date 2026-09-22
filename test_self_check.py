@@ -471,45 +471,71 @@ def run_checks():
         demo_st["totp_enabled"] = True
         save_state(demo_st)
 
-        # /api/auth/status confirms TOTP is active
-        req_status = urllib.request.Request(f"http://127.0.0.1:{test_port}/api/auth/status")
-        with urllib.request.urlopen(req_status, timeout=3) as resp:
-            status_data = json.loads(resp.read().decode("utf-8"))
-            assert status_data.get("totp_enabled") is True, f"Expected totp_enabled True, got {status_data}"
-
-        # Login attempt with valid token but wrong OTP -> 401
-        wrong_otp_val = "000000" if compute_totp(test_totp_secret) != "000000" else "111111"
-        req_wrong_otp = urllib.request.Request(
-            f"http://127.0.0.1:{test_port}/api/auth/verify",
-            data=json.dumps({"token": token, "otp": wrong_otp_val}).encode("utf-8"),
-            headers={"Content-Type": "application/json", "User-Agent": legit_ua},
-            method="POST",
-        )
         try:
-            urllib.request.urlopen(req_wrong_otp, timeout=3)
-            assert False, "Expected 401 for wrong 2FA OTP code"
-        except urllib.error.HTTPError as e:
-            assert e.code == 401
+            # /api/auth/status confirms TOTP is active
+            req_status = urllib.request.Request(f"http://127.0.0.1:{test_port}/api/auth/status")
+            with urllib.request.urlopen(req_status, timeout=3) as resp:
+                status_data = json.loads(resp.read().decode("utf-8"))
+                assert status_data.get("totp_enabled") is True, f"Expected totp_enabled True, got {status_data}"
 
-        # Login attempt with valid token and CORRECT OTP -> 200 + 24h cookie
-        current_otp = compute_totp(test_totp_secret)
-        req_good_otp = urllib.request.Request(
-            f"http://127.0.0.1:{test_port}/api/auth/verify",
-            data=json.dumps({"token": token, "otp": current_otp}).encode("utf-8"),
-            headers={"Content-Type": "application/json", "User-Agent": legit_ua},
+            # Login attempt with valid token but wrong OTP -> 401
+            wrong_otp_val = "000000" if compute_totp(test_totp_secret) != "000000" else "111111"
+            req_wrong_otp = urllib.request.Request(
+                f"http://127.0.0.1:{test_port}/api/auth/verify",
+                data=json.dumps({"token": token, "otp": wrong_otp_val}).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": legit_ua},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(req_wrong_otp, timeout=3)
+                assert False, "Expected 401 for wrong 2FA OTP code"
+            except urllib.error.HTTPError as e:
+                assert e.code == 401
+
+            # Login attempt with valid token and CORRECT OTP -> 200 + 24h cookie
+            current_otp = compute_totp(test_totp_secret)
+            req_good_otp = urllib.request.Request(
+                f"http://127.0.0.1:{test_port}/api/auth/verify",
+                data=json.dumps({"token": token, "otp": current_otp}).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": legit_ua},
+                method="POST",
+            )
+            with urllib.request.urlopen(req_good_otp, timeout=3) as resp:
+                assert resp.status == 200
+                otp_res = json.loads(resp.read().decode("utf-8"))
+                assert otp_res.get("success") is True
+                otp_cookie = resp.headers.get("Set-Cookie", "")
+                assert "Max-Age=86400" in otp_cookie
+        finally:
+            demo_st["totp_enabled"] = False
+            save_state(demo_st)
+
+        print("PASS: 24-hour cookie lifetime and Authenticator App 2FA (TOTP) auth flow verified")
+
+        # O. Logout Verification (Cookie clearance & redirect)
+        req_post_logout = urllib.request.Request(
+            f"http://127.0.0.1:{test_port}/api/auth/logout",
+            data=b"{}",
+            headers={"Content-Type": "application/json", "Cookie": f"mrt={session_cookie}"},
             method="POST",
         )
-        with urllib.request.urlopen(req_good_otp, timeout=3) as resp:
+        with urllib.request.urlopen(req_post_logout, timeout=3) as resp:
             assert resp.status == 200
-            otp_res = json.loads(resp.read().decode("utf-8"))
-            assert otp_res.get("success") is True
-            otp_cookie = resp.headers.get("Set-Cookie", "")
-            assert "Max-Age=86400" in otp_cookie
+            logout_res = json.loads(resp.read().decode("utf-8"))
+            assert logout_res.get("success") is True
+            logout_cookie = resp.headers.get("Set-Cookie", "")
+            assert "Max-Age=0" in logout_cookie and "mrt=deleted" in logout_cookie
 
-        # Restore default optional 2FA state
-        demo_st["totp_enabled"] = False
-        save_state(demo_st)
-        print("PASS: 24-hour cookie lifetime and Authenticator App 2FA (TOTP) auth flow verified")
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", test_port)
+        conn.request("GET", "/logout", headers={"Cookie": f"mrt={session_cookie}"})
+        get_logout_resp = conn.getresponse()
+        assert get_logout_resp.status == 302, f"Expected 302, got {get_logout_resp.status}"
+        assert get_logout_resp.getheader("Location") == "/"
+        get_logout_cookie = get_logout_resp.getheader("Set-Cookie", "")
+        assert "Max-Age=0" in get_logout_cookie and "mrt=deleted" in get_logout_cookie
+        conn.close()
+        print("PASS: Session logout endpoints (POST /api/auth/logout & GET /logout) verified")
     finally:
         server.shutdown()
         server.server_close()

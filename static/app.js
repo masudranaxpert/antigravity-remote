@@ -600,6 +600,18 @@
       refreshBtn.addEventListener('click', () => loadStateData(true));
     }
 
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', async () => {
+        if (!confirm('Log out from Antigravity Remote?')) return;
+        showToast('Logging out...', 'info');
+        try {
+          await apiRequest('/api/auth/logout', { method: 'POST' });
+        } catch (_) {}
+        window.location.href = '/';
+      });
+    }
+
     const sleepPill = document.getElementById('sleep-prevent-pill');
     if (sleepPill) {
       sleepPill.addEventListener('click', async () => {
