@@ -90,10 +90,24 @@ To avoid cognitive overload on mobile screens:
 ## 4. Zero-Trust Mobile Security Model
 
 1. **Host-Local Binding**: The HTTP server binds exclusively to `127.0.0.1:8077`. It is never directly exposed to the public network or local LAN.
-2. **Cryptographic Token Verification**:
-   - On initial boot, a high-entropy 32-character URL-safe security token is generated (`secrets.token_urlsafe`).
-   - All API routes and dashboard views require authentication via query parameter (`?token=...`) or persistent HTTP cookie (`mrt=...`).
-   - Unauthorized requests return HTTP 401 with a minimal authentication challenge.
-3. **Encrypted Cloudflare Tunnel**:
-   - The Quick Tunnel negotiates an outbound TLS tunnel from the host PC to Cloudflare's edge network.
+2. **Encrypted Cloudflare Tunnel**:
+   - The tunnel negotiates an outbound TLS connection from the host PC to Cloudflare's edge network.
    - No inbound router ports, dynamic DNS, or port forwarding are required.
+3. **Multi-Factor Authentication (RFC 6238 TOTP)**:
+   - Supports standard Time-Based One-Time Passwords (compatible with Google Authenticator, Microsoft Authenticator, 1Password).
+   - Computes HMAC-SHA1 over 30-second intervals with $\pm 1$ time-step clock drift allowance.
+   - Pure Python standard library implementation in `app/totp.py` without external pip dependencies.
+4. **Device-Bound Ephemeral Session Tokens (Anti-Cookie-Hijacking)**:
+   - Instead of storing raw master tokens in cookies, the server issues cryptographically signed session tokens:
+     `v1.<epoch>.<device_fingerprint>.<hmac_signature>`
+   - `device_fingerprint` hashes client `User-Agent`, `Accept-Language`, and `Sec-Ch-Ua-Platform`.
+   - Replay attempts using a stolen session cookie from a different browser or device fail authentication with `HTTP 401 Unauthorized`.
+5. **Strict 24-Hour Session Lifetime**:
+   - All session cookies enforce `Max-Age=86400` with `HttpOnly; SameSite=Lax`.
+   - Server-side epoch validation (`time.time() - epoch > 86400`) ensures expired tokens cannot be reused, requiring periodic re-authentication.
+6. **Access Audit Logging (`log/ip.json`)**:
+   - Client IPs, Cloudflare geo attributes (`CF-IPCountry`, `CF-Ray`), device types, and authentication outcomes are persistently logged.
+   - Built-in 30-day retention filter automatically purges expired records during runtime.
+7. **Administrative Terminal Killswitch**:
+   - Both the `/terminal` web view and `/api/terminal/ws` WebSocket upgrade endpoints are gated by `terminal_enabled` in `state.json`/`static.json`.
+   - When disabled, shell execution is strictly blocked with `HTTP 403 Forbidden`.

@@ -20,6 +20,8 @@
 - **Anti-Cookie-Theft & Device Binding**: Cryptographically signed ephemeral session tokens bound to the client's device fingerprint (OS, browser, platform). Even if an attacker copies the cookie header, replay attempts on different devices or browsers are immediately rejected with HTTP 401.
 - **Access Audit Logging (`log/ip.json`)**: Persistent audit logging recording client IP, Cloudflare country/datacenter, device type, OS, and browser with automatic 30-day retention and self-cleaning.
 - **Terminal Access Killswitch**: Instantly toggle shell terminal access on/off via `state.json`, `static.json`, CLI (`--disable-terminal`), or web API.
+- **Optional Authenticator App 2FA (RFC 6238 TOTP)**: Two-factor authentication compatible with Google Authenticator, Microsoft Authenticator, and 1Password. Optional and configurable via CLI (`python3 launcher.py --setup-totp`).
+- **Strict 24-Hour Session Lifecycle**: Enforces `Max-Age=86400` on device-bound cookies and validates server-side token timestamps. Sessions expire exactly after 24 hours, requiring re-authentication.
 - **Studio-Grade UI**: Refined dark palette (`#0d0f12`), symmetrical mobile action buttons, zero layout thrashing, dedicated server-side auth gate (zero FOUC), and responsive layouts.
 - **Zero Dependencies**: 100% Python standard library. No pip packages, no node_modules.
 - **Desktop & Terminal Integration**: Dedicated desktop shortcut with independent taskbar icon and live request streaming.
@@ -66,7 +68,9 @@ https://<your-tunnel>.trycloudflare.com/?token=<your-token>
 
 ## Security
  
+- **Optional 2-Factor Authentication (TOTP - RFC 6238)**: Compatible with Google Authenticator and Microsoft Authenticator. When active, requires the 6-digit one-time code on every login, eliminating credential reuse vulnerabilities.
 - **Device-Bound Ephemeral Sessions**: Uses HMAC-signed tokens tied to the authorized client's browser and device fingerprint. Session tokens cannot be replayed from other devices.
+- **Strict 24-Hour Session Lifetime**: Enforces `Max-Age=86400` with server-side epoch validation. Sessions automatically expire after 24 hours.
 - **HttpOnly & SameSite Protection**: Cookies are transmitted with `HttpOnly; SameSite=Lax` headers, immune to client-side XSS exfiltration.
 - **Access Audit Trail**: All authentication attempts, incoming client IPs, and device details are logged in `log/ip.json` with 30-day retention.
 - **Terminal Killswitch**: Web shell access is gated by both authentication and an administrative toggle in `state.json`/`static.json`.

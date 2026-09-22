@@ -99,7 +99,9 @@ All application settings are persisted in `state.json` in the root directory.
   "custom_domain": "remote.yourdomain.com",
   "tunnel_mode": "permanent",
   "prevent_sleep": true,
-  "terminal_enabled": true
+  "terminal_enabled": true,
+  "totp_enabled": false,
+  "totp_secret": "ABCDEFGHIJKLMNOP"
 }
 ```
 
@@ -110,6 +112,8 @@ All application settings are persisted in `state.json` in the root directory.
 | `tunnel_mode` | `string` | `"auto"` | Controls how the remote tunnel behaves. See mode table below. |
 | `prevent_sleep` | `boolean` | `true` | When `true`, prevents host OS auto-suspend and idle sleep while the server runs using Linux native `systemd-inhibit`. Toggleable from the mobile web UI. |
 | `terminal_enabled` | `boolean` | `true` | When `false`, completely locks down and disables the Mobile Web Terminal (returns HTTP 403 and hides button in UI). |
+| `totp_enabled` | `boolean` | `false` | When `true`, enforces RFC 6238 6-digit TOTP one-time password on all logins (Google/Microsoft Authenticator). |
+| `totp_secret` | `string` | `""` | Base32 secret key for RFC 6238 TOTP calculation. Configured via `--setup-totp`. |
 
 ### Tunnel Modes (`tunnel_mode`)
 
@@ -120,6 +124,30 @@ All application settings are persisted in `state.json` in the root directory.
 | `"quick"` | Forces an ephemeral Cloudflare Quick Tunnel (`*.trycloudflare.com`), even if a permanent system service is running. | Ideal for quick testing or sharing a temporary link without disclosing your personal domain. |
 | `"dual"` | Runs **both** tunnels concurrently. Displays your permanent custom domain link and a fresh temporary Quick Tunnel link side by side. | Useful when you want fixed personal access while simultaneously sharing a guest link. |
 | `"local"` | Starts the local HTTP server on `127.0.0.1:8077` with no cloud tunnel. | Local network / Wi-Fi only, or when connecting via WireGuard / Tailscale VPN. |
+
+---
+
+## 🔐 2-Factor Authentication (Google / Microsoft Authenticator)
+
+Antigravity Remote features a native **RFC 6238 Time-Based One-Time Password (TOTP)** engine built entirely with standard library Python (zero pip dependencies).
+
+### 1. Interactive CLI Setup
+Run the setup command from your host terminal:
+```bash
+python3 launcher.py --setup-totp
+```
+
+The launcher will display your Base32 secret key (e.g., `ABCD EFGH JKLM NPQR`) and standard `otpauth://` URI:
+1. Open **Google Authenticator**, **Microsoft Authenticator**, or **1Password** on your mobile device.
+2. Tap `+` -> **"Enter a setup key"** (or "Manual entry").
+3. Set Account Name: `Antigravity Remote`, enter the secret key, and select **Time-based**.
+4. Type the 6-digit verification code into your terminal prompt to confirm.
+
+### 2. Enabling or Disabling 2FA
+- To disable 2FA requirement: `python3 launcher.py --disable-totp`
+- To re-enable 2FA requirement: `python3 launcher.py --enable-totp`
+
+Once enabled, every new login to the remote gateway will require both the mobile token and the 6-digit code. Sessions remain active for 24 hours before requiring re-verification.
 
 ---
 
@@ -151,6 +179,11 @@ python3 launcher.py --allow-sleep    # Allow normal OS idle sleep/suspend
 # Terminal Access controls
 python3 launcher.py --disable-terminal  # Block and disable interactive web terminal
 python3 launcher.py --enable-terminal   # Enable interactive web terminal
+
+# Two-Factor Authentication (TOTP) controls
+python3 launcher.py --setup-totp    # Configure Authenticator app interactively
+python3 launcher.py --enable-totp   # Enable 2FA code requirement
+python3 launcher.py --disable-totp  # Disable 2FA code requirement
 
 # Display CLI help
 python3 launcher.py --help

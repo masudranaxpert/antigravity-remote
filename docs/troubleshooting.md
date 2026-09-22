@@ -87,3 +87,29 @@ The token is located in `state.json` inside the application root directory:
 }
 ```
 You can edit this token at any time. When modified, restart `launcher.py` to apply.
+
+---
+
+### 7. Lost Authenticator phone or 2FA verification failing?
+**Cause:** Phone clock drift or lost Authenticator app configuration.  
+**Solution:**
+You can reset or bypass 2FA directly from your host PC terminal without needing the phone:
+```bash
+# Disable 2FA requirement immediately
+python3 launcher.py --disable-totp
+
+# Or reconfigure a fresh Authenticator key
+python3 launcher.py --setup-totp
+```
+
+---
+
+### 8. Why does my mobile browser log out after 24 hours?
+**Cause:** Security policy enforcement.  
+**Details:** To protect your host machine from unauthorized access via old, abandoned mobile browser tabs, all session cookies have a strict 24-hour lifetime (`Max-Age=86400`). After 24 hours, you simply enter your secret token (and 6-digit 2FA code if enabled) to renew the session for another 24 hours.
+
+---
+
+### 9. Web terminal disconnects after being idle in mobile browser
+**Cause:** Mobile operating systems (iOS / Android) aggressively sleep background WebSocket network sockets, or Cloudflare drops idle connections after 60-100 seconds.  
+**Details:** Antigravity Remote incorporates an automatic 15-second ping/pong heartbeat and an exponential backoff auto-reconnector in `terminal.js`. When you switch back to the browser tab, the terminal automatically re-establishes the connection within 1-2 seconds.
