@@ -64,6 +64,10 @@
   color: #ffffff;
 }
 
+html, body {
+  overflow-x: hidden;
+}
+
 body {
   background-color: var(--bg);
   color: var(--text-primary);
@@ -106,53 +110,66 @@ body {
 
 /* Top Studio Header */
 .studio-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "brand refresh"
+    "actions actions";
+  row-gap: 12px;
+  column-gap: 10px;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
+  padding: 12px 14px;
   background-color: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   margin-bottom: 18px;
   box-shadow: 0 4px 18px -2px rgba(0, 0, 0, 0.35);
 }
 
 .brand-group {
+  grid-area: brand;
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .brand-logo {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: var(--radius-md);
   background-color: var(--surface-raised);
   border: 1px solid var(--border);
   color: var(--gemini-accent);
+  flex-shrink: 0;
 }
 
 .brand-logo img {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   object-fit: contain;
+}
+
+.brand-info {
+  min-width: 0;
 }
 
 .brand-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.03em;
   color: var(--text-primary);
+  white-space: nowrap;
 }
 
 .brand-tag {
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.04em;
   padding: 2px 6px;
@@ -163,23 +180,32 @@ body {
 }
 
 .brand-subtitle {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .header-actions {
+  grid-area: actions;
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .host-pill {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 5px 10px;
+  padding: 6px 12px;
+  min-height: 38px;
   border-radius: var(--radius-sm);
   background-color: var(--surface-raised);
   border: 1px solid var(--border);
@@ -187,13 +213,18 @@ body {
   font-weight: 500;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex: 1;
+  flex-shrink: 0;
 }
 
 .audio-pill {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 5px 10px;
+  padding: 6px 12px;
+  min-height: 38px;
   border-radius: var(--radius-sm);
   background-color: var(--surface-raised);
   border: 1px solid var(--border);
@@ -206,6 +237,9 @@ body {
   user-select: none;
   font-family: inherit;
   outline: none;
+  white-space: nowrap;
+  flex: 1;
+  flex-shrink: 0;
 }
 
 .audio-pill:hover {
@@ -239,6 +273,7 @@ body {
   border-radius: 50%;
   background-color: var(--text-tertiary);
   transition: background-color 0.2s ease;
+  flex-shrink: 0;
 }
 
 .status-dot.active {
@@ -251,17 +286,20 @@ body {
 }
 
 .icon-action-btn {
+  grid-area: refresh;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  justify-self: end;
+  width: 38px;
+  height: 38px;
   background-color: var(--surface-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
 .icon-action-btn:hover {
@@ -272,6 +310,43 @@ body {
 
 .icon-action-btn.spinning svg {
   animation: spin 0.8s linear infinite;
+}
+
+@media (min-width: 640px) {
+  .studio-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    gap: 16px;
+  }
+
+  .brand-group {
+    min-width: auto;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: auto;
+    padding-top: 0;
+    border-top: none;
+    margin-left: auto;
+  }
+
+  .host-pill,
+  .audio-pill {
+    flex: initial;
+    min-height: 34px;
+    padding: 5px 12px;
+  }
+
+  .icon-action-btn {
+    width: 34px;
+    height: 34px;
+  }
 }
 
 @keyframes spin {

@@ -35,8 +35,7 @@ def load_state():
     """Load persistent mobile token and saved settings, auto-generating token if missing."""
     if not os.path.exists(STATE_PATH):
         init_state = {
-            "mobile_token": secrets.token_urlsafe(24),
-            "remote_url": ""
+            "mobile_token": secrets.token_urlsafe(24)
         }
         save_state(init_state)
         return init_state
@@ -48,7 +47,7 @@ def load_state():
                 save_state(data)
             return data
     except Exception:
-        return {"mobile_token": secrets.token_urlsafe(24), "remote_url": ""}
+        return {"mobile_token": secrets.token_urlsafe(24)}
 
 
 def save_state(state):
@@ -230,7 +229,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             })
 
         if path == "/api/remote-url":
-            st["remote_url"] = body.get("url", "").strip()
+            url = body.get("url", "").strip()
+            if url:
+                st["remote_url"] = url
+            else:
+                st.pop("remote_url", None)
             save_state(st)
             return self.send_json({"success": True})
 
