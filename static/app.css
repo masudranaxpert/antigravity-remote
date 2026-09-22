@@ -135,6 +135,12 @@ body {
   color: var(--gemini-accent);
 }
 
+.brand-logo img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
 .brand-title {
   display: flex;
   align-items: center;
