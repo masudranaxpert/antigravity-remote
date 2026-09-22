@@ -4,6 +4,7 @@ Serves the mobile web dashboard and coordinates account switching using
 direct filesystem truth and Secret Service credentials.
 Pure Python standard library only.
 """
+import hmac
 import json
 import mimetypes
 import os
@@ -51,10 +52,14 @@ def load_state():
 
 
 def save_state(state):
-    """Atomically persist state configuration."""
+    """Atomically persist state configuration with strict owner permissions."""
     tmp = STATE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
     os.replace(tmp, STATE_PATH)
 
 
@@ -64,14 +69,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
     server_version = "AGRemote/3.0"
 
     def is_authenticated(self):
-        """Verify request authenticity via query parameter or cookie token."""
+        """Verify request authenticity via constant-time token comparison."""
         st = load_state()
         token = st.get("mobile_token", "")
         if not token:
-            return True, st, False
+            token = secrets.token_urlsafe(24)
+            st["mobile_token"] = token
+            save_state(st)
 
         query = parse_qs(urlparse(self.path).query)
-        if query.get("token", [""])[0] == token:
+        token_param = query.get("token", [""])[0]
+        if token_param and hmac.compare_digest(token_param, token):
             return True, st, True
 
         cookie_header = self.headers.get("Cookie", "")
@@ -79,7 +87,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             cookie = SimpleCookie()
             try:
                 cookie.load(cookie_header)
-                if "mrt" in cookie and cookie["mrt"].value == token:
+                if "mrt" in cookie and hmac.compare_digest(cookie["mrt"].value, token):
                     return True, st, False
             except Exception:
                 pass
@@ -140,7 +148,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if path.startswith("/static/"):
             rel_path = path[len("/static/"):].lstrip("/")
             safe_path = os.path.normpath(os.path.join(STATIC_DIR, rel_path))
-            if not safe_path.startswith(STATIC_DIR) or not os.path.isfile(safe_path):
+            if not (safe_path == STATIC_DIR or safe_path.startswith(STATIC_DIR + os.sep)) or not os.path.isfile(safe_path):
                 self.send_response(404)
                 self.end_headers()
                 return
@@ -194,6 +202,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         try:
             length = int(self.headers.get("Content-Length", 0))
+            if length < 0 or length > 1024 * 1024:
+                return self.send_json({"error": "payload_too_large"}, 413)
             body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
         except Exception:
             body = {}

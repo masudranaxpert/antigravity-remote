@@ -7,6 +7,7 @@ import datetime
 import glob
 import json
 import os
+import re
 import signal
 import subprocess
 import time
@@ -85,7 +86,14 @@ def apply_switch(account_id, target_ide="classic"):
     ponytail: direct credential injection guarantees instant switch without
     triggering UI popups or interrupting AMGR system tray operation.
     """
-    account_file = os.path.join(ACCOUNTS_DIR, f"{account_id}.json")
+    account_id = (account_id or "").strip()
+    if not account_id or not re.match(r"^[a-zA-Z0-9_\-]+$", account_id):
+        return False, "Invalid account identifier format."
+
+    account_file = os.path.normpath(os.path.join(ACCOUNTS_DIR, f"{account_id}.json"))
+    if not (account_file == ACCOUNTS_DIR or account_file.startswith(ACCOUNTS_DIR + os.sep)):
+        return False, "Access denied: invalid path."
+
     if not os.path.exists(account_file):
         return False, f"Account record not found: {account_id}"
 

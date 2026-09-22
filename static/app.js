@@ -18,6 +18,27 @@
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 
+  // HTML entity sanitization against XSS
+  function escapeHtml(str) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  // Safe URL protocol validation
+  function sanitizeUrl(url) {
+    if (!url) return '#';
+    const trimmed = String(url).trim();
+    if (/^https?:\/\//i.test(trimmed)) {
+      return escapeHtml(trimmed);
+    }
+    return '#';
+  }
+
   // Top Floating Toast Notification HUD
   function showToast(msg, type = 'ok') {
     const toast = document.getElementById('toast');
@@ -261,7 +282,7 @@
       remoteInput.value = data.remote_url;
       remoteActionWrap.innerHTML = `
         <div class="remote-btn-group">
-          <a href="${data.remote_url}" target="_blank" rel="noopener noreferrer" class="remote-launch-btn">
+          <a href="${sanitizeUrl(data.remote_url)}" target="_blank" rel="noopener noreferrer" class="remote-launch-btn">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
               <polyline points="15 3 21 3 21 9"></polyline>
@@ -323,8 +344,8 @@
               </div>
             </div>
             <div class="hero-account-info">
-              <div class="hero-email">${activeAccount.email}</div>
-              ${activeAccount.name ? `<div class="hero-name">${activeAccount.name}</div>` : ''}
+              <div class="hero-email">${escapeHtml(activeAccount.email)}</div>
+              ${activeAccount.name ? `<div class="hero-name">${escapeHtml(activeAccount.name)}</div>` : ''}
             </div>
           </div>
           ${renderDualQuotas(activeAccount)}
@@ -352,8 +373,8 @@
         <div>
           <div class="account-card-header">
             <div>
-              <div class="account-email">${account.email}</div>
-              ${account.name ? `<div class="account-name">${account.name}</div>` : ''}
+              <div class="account-email">${escapeHtml(account.email)}</div>
+              ${account.name ? `<div class="account-name">${escapeHtml(account.name)}</div>` : ''}
             </div>
             <span class="badge-tier">PRO</span>
           </div>
@@ -361,7 +382,7 @@
             ${renderDualQuotas(account)}
           </div>
         </div>
-        <button type="button" class="switch-btn" data-id="${account.id}" data-email="${account.email}">
+        <button type="button" class="switch-btn" data-id="${escapeHtml(account.id)}" data-email="${escapeHtml(account.email)}">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M17 2.1l4 4-4 4"></path>
             <path d="M3 12.2v-2a4 4 0 0 1 4-4h14"></path>

@@ -123,12 +123,62 @@ def run_checks():
             data_restore = json.loads(resp.read().decode("utf-8"))
             restored_mute = data_restore["audio"]["muted"]
             assert restored_mute != toggled_mute, "Mute toggle did not flip back"
-        print("PASS: POST /api/audio/mute successfully toggled and restored host audio mute state")
+        # F. Invalid token rejection check
+        try:
+            bad_req = urllib.request.Request(f"http://127.0.0.1:{test_port}/api/state", headers={"Cookie": "mrt=invalid_token_12345"})
+            urllib.request.urlopen(bad_req, timeout=3)
+            assert False, "Expected 401 for invalid token"
+        except urllib.error.HTTPError as e:
+            assert e.code == 401, f"Expected 401, got {e.code}"
+        print("PASS: Invalid token rejected with HTTP 401")
+
+        # G. Static directory traversal prevention check
+        try:
+            trav_req = urllib.request.Request(f"http://127.0.0.1:{test_port}/static/../state.json")
+            urllib.request.urlopen(trav_req, timeout=3)
+            assert False, "Expected 404 for directory traversal"
+        except urllib.error.HTTPError as e:
+            assert e.code == 404, f"Expected 404, got {e.code}"
+        print("PASS: Static directory traversal attempt rejected with HTTP 404")
+
+        # H. Payload size limit check (> 1MB returns 413)
+        try:
+            big_body = json.dumps({"payload": "A" * (1024 * 1024 + 10)}).encode("utf-8")
+            big_req = urllib.request.Request(
+                f"http://127.0.0.1:{test_port}/api/switch",
+                data=big_body,
+                headers={"Cookie": f"mrt={token}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(big_req, timeout=3)
+            assert False, "Expected 413 for payload > 1MB"
+        except urllib.error.HTTPError as e:
+            assert e.code == 413, f"Expected 413, got {e.code}"
+        print("PASS: Oversized payload rejected with HTTP 413")
+
+        # I. Malicious account_id path traversal rejection in /api/switch
+        trav_switch_req = urllib.request.Request(
+            f"http://127.0.0.1:{test_port}/api/switch",
+            data=json.dumps({"account_id": "../../etc/passwd"}).encode("utf-8"),
+            headers={"Cookie": f"mrt={token}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(trav_switch_req, timeout=3) as resp:
+            switch_res = json.loads(resp.read().decode("utf-8"))
+            assert switch_res.get("success") is False, "Expected switch to fail for traversal account_id"
+            assert "Invalid" in switch_res.get("error", "") or "Access denied" in switch_res.get("error", "")
+        print("PASS: Malicious account_id path traversal rejected")
+
+        # J. State file permission check (0o600)
+        from app.server import STATE_PATH
+        mode = os.stat(STATE_PATH).st_mode & 0o777
+        assert mode == 0o600, f"Expected state.json mode 0600, found {oct(mode)}"
+        print(f"PASS: state.json restricted to owner-only permissions ({oct(mode)})")
     finally:
         server.shutdown()
         server.server_close()
 
-    print("\nALL RUNNABLE SELF-CHECKS PASSED SUCCESSFULLY.")
+    print("\nALL RUNNABLE SELF-CHECKS & SECURITY VERIFICATIONS PASSED SUCCESSFULLY.")
 
 
 if __name__ == "__main__":
