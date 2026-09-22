@@ -185,6 +185,7 @@ html, body {
   white-space: nowrap;
   flex-shrink: 0;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
 }
 
 .quick-commands-bar::-webkit-scrollbar {
@@ -206,6 +207,9 @@ html, body {
   outline: none;
   transition: all 0.12s ease;
   user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
   flex-shrink: 0;
 }
 
@@ -264,6 +268,7 @@ html, body {
   overflow-x: auto;
   padding: 2px 2px;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
 }
 
 .touch-bar-scroll::-webkit-scrollbar {
@@ -287,6 +292,9 @@ html, body {
   cursor: pointer;
   outline: none;
   user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
   transition: background-color 0.1s ease, border-color 0.1s ease, transform 0.08s ease;
   flex-shrink: 0;
 }

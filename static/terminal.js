@@ -171,6 +171,17 @@
       }, 50);
     }
 
+    // Intercept physical Escape key so browser does not swallow it and sends VT100 double escape sequence
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.key === 'Escape') {
+        if (e.type === 'keydown') {
+          sendInput('\x1b\x1b');
+        }
+        return false;
+      }
+      return true;
+    });
+
     // Process keystrokes typed by user
     term.onData((data) => {
       // Filter out SGR/X10 mouse tracking sequences sent on mobile screen taps (e.g. \x1b[<35;9;3M)
@@ -275,14 +286,45 @@
     }
   }
 
+  function attachTapHandler(container, selector, onTrigger) {
+    let startX = 0;
+    let startY = 0;
+    let isDrag = false;
+
+    container.addEventListener('pointerdown', (e) => {
+      const el = e.target.closest(selector);
+      if (!el) return;
+      startX = e.clientX;
+      startY = e.clientY;
+      isDrag = false;
+    });
+
+    container.addEventListener('pointermove', (e) => {
+      if (!isDrag && Math.hypot(e.clientX - startX, e.clientY - startY) > 8) {
+        isDrag = true;
+      }
+    });
+
+    container.addEventListener('pointerup', (e) => {
+      if (isDrag) return;
+      const el = e.target.closest(selector);
+      if (!el) return;
+      e.preventDefault();
+      onTrigger(el);
+    });
+
+    // Suppress synthetic click to prevent duplicate trigger
+    container.addEventListener('click', (e) => {
+      const el = e.target.closest(selector);
+      if (el) e.preventDefault();
+    });
+  }
+
   function initAccessoryBar() {
     const bar = document.getElementById('accessory-bar');
     if (!bar) return;
 
-    bar.addEventListener('click', (e) => {
-      const btn = e.target.closest('button');
-      if (!btn) return;
-
+    attachTapHandler(bar, 'button', (btn) => {
       const key = btn.getAttribute('data-key');
       const raw = btn.getAttribute('data-raw');
 
@@ -299,7 +341,8 @@
 
       switch (key) {
         case 'escape':
-          sendInput('\x1b');
+          // Send double escape (\x1b\x1b) to satisfy TUI parsers without timeout buffering delay
+          sendInput('\x1b\x1b');
           break;
         case 'tab':
           sendInput('\t');
@@ -337,10 +380,7 @@
     const bar = document.getElementById('quick-commands-bar');
     if (!bar) return;
 
-    bar.addEventListener('click', (e) => {
-      const chip = e.target.closest('.quick-chip');
-      if (!chip) return;
-
+    attachTapHandler(bar, '.quick-chip', (chip) => {
       const cmd = chip.getAttribute('data-cmd');
       if (cmd) {
         sendInput(cmd);
