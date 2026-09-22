@@ -86,32 +86,59 @@ Open `state.json` located in the root of the application:
 ```json
 {
   "mobile_token": "your-secret-token",
-  "remote_url": "",
-  "custom_domain": "remote.yourdomain.com"
+  "custom_domain": "remote.yourdomain.com",
+  "tunnel_mode": "permanent",
+  "remote_url": ""
 }
 ```
 
-When `launcher.py` starts:
-1. It detects that `cloudflared.service` is actively managing the tunnel.
-2. It bypasses the temporary Quick Tunnel handshake.
-3. It prints your permanent, authoritative mobile URL directly in the terminal:
-   ```text
-   ==========================================================================
-                    ANTIGRAVITY REMOTE - CONTROL CENTER
-   ==========================================================================
-     [✓] Local Port  : http://127.0.0.1:8077
-     [✓] Cloud Tunnel: https://remote.yourdomain.com
-     [✓] Secret Token: your-secret-token
-   --------------------------------------------------------------------------
-     👉 OPEN ON MOBILE (Direct Authorized Link):
-        https://remote.yourdomain.com/?token=your-secret-token
-   ==========================================================================
-   ```
+### Tunnel Modes in `state.json`
+
+| Value | Description |
+| :--- | :--- |
+| `"permanent"` | Strictly binds to your Cloudflare Named Tunnel (`cloudflared.service`). Never generates temporary links. |
+| `"auto"` *(Default)* | Automatically detects if `cloudflared.service` is active. If active, uses permanent domain; otherwise falls back to Quick Tunnel. |
+| `"quick"` | Forces an ephemeral Quick Tunnel (`*.trycloudflare.com`), even if the permanent service is running. |
+| `"dual"` | Runs **both** tunnels concurrently, displaying your permanent domain link and a temporary Quick Tunnel share link side by side. |
+| `"local"` | Binds only to `127.0.0.1:8077` with no public cloud tunnel. |
 
 ---
 
-## ⚡ Fallback Behavior
+## ⚡ On-The-Fly CLI Overrides
 
-Antigravity Remote is designed to be fully plug-and-play:
-- **With Systemd Service / Custom Domain**: Connects directly to your permanent domain.
-- **Without Systemd Service**: Automatically spins up an ephemeral Quick Tunnel (`*.trycloudflare.com`) on demand. No configuration needed on secondary machines.
+You can temporarily switch modes without modifying `state.json`:
+
+```bash
+# Force a temporary Quick Tunnel even while the permanent service is running
+./run.sh --quick           # or -q, --try
+python3 launcher.py --quick
+
+# Run both permanent domain and temporary link simultaneously
+./run.sh --dual            # or -d
+python3 launcher.py --dual
+
+# Force permanent domain mode
+./run.sh --permanent       # or -p
+python3 launcher.py --permanent
+
+# Local only
+./run.sh --local           # or -l
+```
+
+When running in **Dual Mode** (`--dual`), both connections proxy to `localhost:8077` simultaneously without port conflicts:
+```text
+==========================================================================
+                 ANTIGRAVITY REMOTE - CONTROL CENTER
+==========================================================================
+  [✓] Local Port     : http://127.0.0.1:8077
+  [✓] Permanent URL  : https://remote.yourdomain.com
+  [✓] Quick Tunnel   : https://sample-words.trycloudflare.com
+  [✓] Secret Token   : your-secret-token
+--------------------------------------------------------------------------
+  👉 PERMANENT LINK (Your Domain):
+     https://remote.yourdomain.com/?token=your-secret-token
+
+  👉 QUICK SHARE LINK (Temporary):
+     https://sample-words.trycloudflare.com/?token=your-secret-token
+==========================================================================
+```

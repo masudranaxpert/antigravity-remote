@@ -87,18 +87,76 @@ python launcher.py
 
 ---
 
-## ⚙️ Configuration & Custom Ports
+## ⚙️ Configuration & Customization
 
-By default, the server binds to port `8077`. To change the port or customize behavior:
+All application settings are persisted in `state.json` in the root directory.
 
-1. Edit `launcher.py` and modify:
-   ```python
-   PORT = 8077  # Set to any available unprivileged port
-   ```
-2. The security token is stored in `state.json`. If you wish to change your mobile access password, edit `state.json`:
-   ```json
-   {
-     "mobile_token": "your-custom-secret-token",
-     "remote_url": ""
-   }
-   ```
+### `state.json` Schema & Options
+
+```json
+{
+  "mobile_token": "kRyxKoPlmIu76udnBKx2OORdYGwU5-q9",
+  "custom_domain": "remote.yourdomain.com",
+  "tunnel_mode": "permanent",
+  "remote_url": ""
+}
+```
+
+| Key | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `mobile_token` | `string` | *(Auto-generated)* | Cryptographically random secret token required to unlock the mobile dashboard. Can be customized. |
+| `custom_domain` | `string` | `""` | Your registered Cloudflare Zero Trust public hostname (e.g. `remote.yourdomain.com`). Used for permanent link generation. |
+| `tunnel_mode` | `string` | `"auto"` | Controls how the remote tunnel behaves. See mode table below. |
+| `remote_url` | `string` | `""` | Optional manual override for Google Account Chooser remote desktop session link. |
+
+### Tunnel Modes (`tunnel_mode`)
+
+| Mode | Behavior | Use Case |
+| :--- | :--- | :--- |
+| `"auto"` | If Cloudflare Zero Trust system service is active, uses your permanent domain. If not, automatically falls back to Quick Tunnel (`trycloudflare.com`). | Default setup for zero-configuration deployments. |
+| `"permanent"` | Strictly binds to your Cloudflare Named Tunnel (`cloudflared.service`). Never spins up temporary trycloudflare links. | Recommended when you have your own domain and want 100% fixed, non-expiring access. |
+| `"quick"` | Forces an ephemeral Cloudflare Quick Tunnel (`*.trycloudflare.com`), even if a permanent system service is running. | Ideal for quick testing or sharing a temporary link without disclosing your personal domain. |
+| `"dual"` | Runs **both** tunnels concurrently. Displays your permanent custom domain link and a fresh temporary Quick Tunnel link side by side. | Useful when you want fixed personal access while simultaneously sharing a guest link. |
+| `"local"` | Starts the local HTTP server on `127.0.0.1:8077` with no cloud tunnel. | Local network / Wi-Fi only, or when connecting via WireGuard / Tailscale VPN. |
+
+---
+
+## 💻 CLI Flags & Shortcuts
+
+You can override `state.json` settings on the fly from the command line:
+
+```bash
+# Force temporary Quick Tunnel
+./run.sh --quick           # or -q, --try
+python3 launcher.py --quick
+
+# Force Permanent Named Tunnel (Custom Domain)
+./run.sh --permanent       # or -p
+python3 launcher.py --permanent
+
+# Run both Permanent and Quick Tunnels simultaneously
+./run.sh --dual            # or -d
+python3 launcher.py --dual
+
+# Localhost only (no cloud tunnel)
+./run.sh --local           # or -l
+python3 launcher.py --local
+
+# Display CLI help
+python3 launcher.py --help
+```
+
+---
+
+## 🖥️ Desktop Shortcut Management
+
+To ensure only **one** clean desktop launcher icon is shown:
+
+```bash
+# Copy single trusted desktop entry
+cp "com.antigravity.remote.desktop" ~/Desktop/"Antigravity Remote.desktop"
+chmod +x ~/Desktop/"Antigravity Remote.desktop"
+gio set ~/Desktop/"Antigravity Remote.desktop" metadata::trusted true
+```
+
+Double-clicking the desktop icon automatically starts the native dark terminal window, reads your `state.json` configuration, and displays the authorized connection URL.

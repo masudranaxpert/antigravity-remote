@@ -11,9 +11,11 @@
 
 - **One-Tap Account Switcher**: Swap active Google accounts directly from your phone. Injects credentials into system keyring and restarts Antigravity cleanly.
 - **Authoritative Identity Detection**: Decodes Google OAuth JWT claims (`id_token`) on the fly to detect the active account with 100% accuracy.
-- **Official Remote Gateway**: Generates one-tap Google Account Chooser remote desktop links.
-- **Dual Quota Telemetry**: Clean tracking for Gemini and Claude with live countdown reset timers.
-- **Refined Studio UI**: Built with a calm neutral carbon palette, zero layout thrashing, and responsive mobile/desktop layouts.
+- **Host PC Audio Telemetry & Remote Control**: Live master volume percentage detection and one-tap remote mute/unmute directly from your phone.
+- **Official Remote Gateway**: Generates one-tap Google Account Chooser remote desktop links with pre-authorized active credentials.
+- **Dual Quota Telemetry**: Clean, unnested tracking for Gemini and Claude with live countdown reset timers.
+- **Multi-Mode Tunnel Engine**: Instant support for permanent Cloudflare Zero Trust custom domains, temporary Quick Tunnels (`trycloudflare.com`), Dual Mode, and Localhost-only.
+- **Studio-Grade UI**: Refined dark palette (`#0d0f12`), zero layout thrashing, dedicated server-side auth gate (zero FOUC), and responsive layouts.
 - **Zero Dependencies**: 100% Python standard library. No pip packages, no node_modules.
 - **Desktop & Terminal Integration**: Dedicated desktop shortcut with independent taskbar icon and live request streaming.
 
