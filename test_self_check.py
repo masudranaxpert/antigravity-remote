@@ -395,14 +395,25 @@ def run_checks():
         print("PASS: Anti-cookie-hijacking device binding verified (Cookie replay rejected with HTTP 401)")
 
         # K. Access Audit Logging (log/ip.json) & 30-day retention check
-        from app.audit import IP_LOG_PATH, load_ip_log, purge_expired_records
+        from app.audit import IP_LOG_PATH, load_ip_log, purge_expired_records, enforce_size_limit, MAX_LOG_SIZE_BYTES
         assert os.path.exists(IP_LOG_PATH), "Expected log/ip.json to be created"
         ip_data = load_ip_log()
         assert "devices" in ip_data and len(ip_data["devices"]) > 0, "No device telemetry in log/ip.json"
         assert ip_data.get("retention_days") == 30, "Expected 30-day retention policy"
-        
-        # Test 30-day purge logic
+        assert ip_data.get("max_size_mb") == 15, "Expected 15MB size limit policy"
+        assert MAX_LOG_SIZE_BYTES == 15 * 1024 * 1024, "Expected MAX_LOG_SIZE_BYTES to be 15MB"
+
+        # Test 15MB size limit enforcement with simulated oversized data
         test_now = 1000000000.0
+        oversized_data = {
+            "devices": {f"10.0.0.{i}": {"last_seen_epoch": test_now - i, "data": "x" * 200} for i in range(100)},
+            "recent_events": [{"epoch": test_now - i, "log": "payload" * 50} for i in range(200)],
+        }
+        capped_data = enforce_size_limit(oversized_data, max_bytes=800)
+        capped_bytes = len(json.dumps(capped_data, indent=2, ensure_ascii=False).encode("utf-8"))
+        assert capped_bytes <= 800, f"Size limit violated: expected <= 800 bytes, got {capped_bytes}"
+
+        # Test 30-day purge logic
         stale_data = {
             "devices": {
                 "1.1.1.1": {"last_seen_epoch": test_now - (35 * 86400)},  # 35 days old (should be purged)
@@ -417,7 +428,7 @@ def run_checks():
         assert "1.1.1.1" not in purged["devices"], "35-day old device record was not purged"
         assert "2.2.2.2" in purged["devices"], "5-day old device record was wrongly purged"
         assert len(purged["recent_events"]) == 1, "Stale events were not purged"
-        print("PASS: Access audit logging (log/ip.json) & 30-day retention auto-purge verified")
+        print("PASS: Access audit logging (log/ip.json) 30-day retention & 15MB size ceiling verified")
 
         # L. Terminal Access Killswitch (state.json / static.json toggle)
         from app.server import save_state

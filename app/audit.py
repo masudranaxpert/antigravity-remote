@@ -14,6 +14,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_DIR = os.path.join(BASE_DIR, "log")
 IP_LOG_PATH = os.path.join(LOG_DIR, "ip.json")
 RETENTION_SECONDS = 30 * 86400  # 30 days retention
+MAX_LOG_SIZE_BYTES = 15 * 1024 * 1024  # 15 MB limit
 
 
 def parse_device_info(user_agent: str) -> dict:
@@ -121,6 +122,7 @@ def load_ip_log() -> dict:
         return {
             "version": 1,
             "retention_days": 30,
+            "max_size_mb": 15,
             "last_updated": format_12hr_timestamp(time.time()),
             "devices": {},
             "recent_events": [],
@@ -138,23 +140,66 @@ def load_ip_log() -> dict:
                 data["devices"] = {}
             if not isinstance(data.get("recent_events"), list):
                 data["recent_events"] = []
+            if "retention_days" not in data:
+                data["retention_days"] = 30
+            if "max_size_mb" not in data:
+                data["max_size_mb"] = 15
             return data
     except Exception:
         return {
             "version": 1,
             "retention_days": 30,
+            "max_size_mb": 15,
             "last_updated": format_12hr_timestamp(time.time()),
             "devices": {},
             "recent_events": [],
         }
 
 
+def enforce_size_limit(data: dict, max_bytes: int = MAX_LOG_SIZE_BYTES) -> dict:
+    """Prune oldest events and inactive devices to keep log/ip.json strictly within max_bytes."""
+    encoded = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return data
+
+    # 1. Truncate oldest recent_events first
+    events = data.get("recent_events", [])
+    while events and len(encoded) > max_bytes:
+        events = events[max(1, len(events) // 2) :]
+        data["recent_events"] = events
+        encoded = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+
+    # 2. Prune oldest devices by last_seen_epoch if still exceeding size ceiling
+    if len(encoded) > max_bytes and data.get("devices"):
+        sorted_ips = sorted(
+            data["devices"].keys(),
+            key=lambda ip: data["devices"][ip].get("last_seen_epoch", 0),
+        )
+        while sorted_ips and len(encoded) > max_bytes:
+            batch = sorted_ips[: max(1, len(sorted_ips) // 4)]
+            sorted_ips = sorted_ips[len(batch) :]
+            for ip in batch:
+                data["devices"].pop(ip, None)
+            encoded = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+
+    return data
+
+
 def save_ip_log(data: dict) -> None:
-    """Atomically save audit log to log/ip.json with 0o600 permissions."""
+    """Atomically save audit log to log/ip.json with 0o600 permissions and 15MB ceiling."""
     os.makedirs(LOG_DIR, mode=0o700, exist_ok=True)
+    clean = {
+        "version": data.get("version", 1),
+        "retention_days": 30,
+        "max_size_mb": 15,
+        "last_updated": data.get("last_updated", format_12hr_timestamp(time.time())),
+        "devices": data.get("devices", {}),
+        "recent_events": data.get("recent_events", []),
+    }
+    clean = enforce_size_limit(clean, MAX_LOG_SIZE_BYTES)
     tmp = IP_LOG_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(clean, f, indent=2, ensure_ascii=False)
     try:
         os.chmod(tmp, 0o600)
     except OSError:
@@ -167,7 +212,7 @@ def save_ip_log(data: dict) -> None:
 
 
 def purge_expired_records(data: dict, now: float) -> dict:
-    """Purge any devices or log events older than 30 days."""
+    """Purge any devices or log events older than 30 days or exceeding 15MB ceiling."""
     cutoff = now - RETENTION_SECONDS
 
     # Filter devices where last seen is older than 30 days
@@ -185,7 +230,7 @@ def purge_expired_records(data: dict, now: float) -> dict:
     ]
     # Keep up to 200 most recent events
     data["recent_events"] = surviving_events[-200:]
-    return data
+    return enforce_size_limit(data, MAX_LOG_SIZE_BYTES)
 
 
 def record_client_access(
