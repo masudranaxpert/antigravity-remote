@@ -178,7 +178,7 @@
   let lastFitWidth = 0;
   let lastFitHeight = 0;
 
-  function debouncedFit(delay = 180) {
+  function debouncedFit(delay = 120) {
     clearTimeout(debouncedFitTimer);
     debouncedFitTimer = setTimeout(() => {
       if (fitAddon && term) {
@@ -186,7 +186,7 @@
         if (container) {
           const w = container.clientWidth;
           const h = container.clientHeight;
-          if (lastFitWidth > 0 && Math.abs(w - lastFitWidth) < 6 && Math.abs(h - lastFitHeight) < 10) {
+          if (lastFitWidth > 0 && Math.abs(w - lastFitWidth) < 4 && Math.abs(h - lastFitHeight) < 6) {
             return;
           }
           lastFitWidth = w;
@@ -1234,21 +1234,75 @@
   window.addEventListener('online', handleWakeup);
 
   // Viewport tracking for soft keyboard state and safe-area adjustments
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', () => {
-      const isKeyboardOpen = window.visualViewport.height < window.innerHeight - 80;
+  let lastViewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  let wasKeyboardOpen = false;
+
+  function syncViewportLayout(forceImmediate = false) {
+    if (window.visualViewport) {
+      const vh = window.visualViewport.height;
+      document.documentElement.style.setProperty('--app-height', `${vh}px`);
+      const scaffold = document.querySelector('.terminal-scaffold');
+      if (scaffold) {
+        scaffold.style.height = `${vh}px`;
+      }
+
+      // Eliminate any window scroll displacement caused by mobile keyboard open/close
+      if (window.scrollY !== 0 || window.scrollX !== 0) {
+        window.scrollTo(0, 0);
+      }
+      if (document.body.scrollTop !== 0) {
+        document.body.scrollTop = 0;
+      }
+
+      const isKeyboardOpen = vh < window.innerHeight - 80;
+      const keyboardToggled = (isKeyboardOpen !== wasKeyboardOpen);
+      wasKeyboardOpen = isKeyboardOpen;
+
       if (isKeyboardOpen) {
         document.body.classList.add('keyboard-open');
       } else {
         document.body.classList.remove('keyboard-open');
       }
-      debouncedFit();
+
+      const heightDelta = Math.abs(vh - lastViewportHeight);
+      lastViewportHeight = vh;
+
+      // On keyboard open/close or significant viewport shift: fit IMMEDIATELY (zero lag!)
+      if (forceImmediate || keyboardToggled || heightDelta > 50) {
+        clearTimeout(debouncedFitTimer);
+        requestAnimationFrame(() => {
+          if (fitAddon && term) {
+            fitAddon.fit();
+            sendResize(term.cols, term.rows);
+          }
+        });
+        // Settle once keyboard slide transition completes
+        debouncedFitTimer = setTimeout(() => {
+          if (fitAddon && term) {
+            fitAddon.fit();
+            sendResize(term.cols, term.rows);
+          }
+        }, 120);
+        return;
+      }
+    }
+
+    debouncedFit(120);
+  }
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => syncViewportLayout(false));
+    window.visualViewport.addEventListener('scroll', () => {
+      if (window.visualViewport.offsetTop > 0 || window.scrollY !== 0) {
+        window.scrollTo(0, 0);
+      }
     });
   } else {
-    window.addEventListener('resize', () => debouncedFit());
+    window.addEventListener('resize', () => debouncedFit(120));
   }
 
   window.addEventListener('DOMContentLoaded', () => {
+    syncViewportLayout(true);
     initTerminal();
     initAccessoryBar();
     initHeaderControls();
