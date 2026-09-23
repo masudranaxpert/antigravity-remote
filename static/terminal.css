@@ -375,6 +375,7 @@ html, body {
   color: var(--emerald);
   background-color: var(--emerald-bg);
   border-color: rgba(16, 185, 129, 0.35);
+  min-width: 44px;
 }
 
 .acc-btn.enter-btn:active, .acc-btn.enter-btn.holding {

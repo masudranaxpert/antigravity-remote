@@ -651,6 +651,7 @@
     let holdTimer = null;
     let repeatInterval = null;
     let hasRepeated = false;
+    let lastTriggerTime = 0;
 
     function clearHold() {
       clearTimeout(holdTimer);
@@ -670,9 +671,8 @@
 
     container.addEventListener('pointerdown', (e) => {
       const el = e.target.closest(selector);
-      if (el) {
-        e.preventDefault();
-      }
+      if (!el) return;
+      e.preventDefault();
       clearHold();
       isDrag = false;
       hasRepeated = false;
@@ -686,10 +686,12 @@
             hasRepeated = true;
             el.classList.add('holding');
             triggerHaptic(12);
+            lastTriggerTime = Date.now();
             onTrigger(el);
             repeatInterval = setInterval(() => {
               if (activeEl === el) {
                 triggerHaptic(6);
+                lastTriggerTime = Date.now();
                 onTrigger(el);
               } else {
                 clearHold();
@@ -701,23 +703,26 @@
     });
 
     container.addEventListener('pointermove', (e) => {
-      if (!isDrag && Math.hypot(e.clientX - startX, e.clientY - startY) > 8) {
+      // Horizontal swipe threshold: 18px (scrolls accessory bar; ignores vertical thumb jitter)
+      if (!isDrag && Math.abs(e.clientX - startX) > 18) {
         isDrag = true;
         clearHold();
       }
     });
 
     container.addEventListener('pointerup', (e) => {
-      const el = e.target.closest(selector);
+      const targetBtn = activeEl;
       const wasHolding = hasRepeated;
       clearHold();
-      if (isDrag || !activeEl) return;
-      if (!el || el !== activeEl) return;
+      activeEl = null;
+
+      if (isDrag || !targetBtn) return;
       e.preventDefault();
       if (!wasHolding) {
-        onTrigger(el);
+        triggerHaptic(10);
+        lastTriggerTime = Date.now();
+        onTrigger(targetBtn);
       }
-      activeEl = null;
     });
 
     container.addEventListener('pointercancel', () => {
@@ -726,13 +731,14 @@
       activeEl = null;
     });
 
-    container.addEventListener('pointerleave', () => {
-      clearHold();
-    });
-
+    // Fallback for keyboard navigation or synthetic accessibility clicks
     container.addEventListener('click', (e) => {
       const el = e.target.closest(selector);
-      if (el) e.preventDefault();
+      if (!el) return;
+      e.preventDefault();
+      if (Date.now() - lastTriggerTime < 300) return;
+      lastTriggerTime = Date.now();
+      onTrigger(el);
     });
   }
 
@@ -895,6 +901,33 @@
     toggleComposer(false);
   }
 
+  function triggerEnter() {
+    let handled = false;
+    if (term && term.textarea) {
+      try {
+        term.textarea.value = '';
+        const enterEvt = new KeyboardEvent('keydown', {
+          key: 'Enter',
+          code: 'Enter',
+          keyCode: 13,
+          which: 13,
+          bubbles: true,
+          cancelable: true
+        });
+        const dispatched = term.textarea.dispatchEvent(enterEvt);
+        if (!dispatched) {
+          handled = true;
+        }
+      } catch (_) {}
+      term.textarea.value = '';
+      term.textarea.focus({ preventScroll: true });
+    }
+    if (!handled) {
+      sendInput('\r');
+    }
+    triggerHaptic(14);
+  }
+
   function initAccessoryBar() {
     const bar = document.getElementById('accessory-bar');
     if (!bar) return;
@@ -935,8 +968,8 @@
       if (key) {
         switch (key) {
           case 'enter':
-            sendInput('\r');
-            break;
+            triggerEnter();
+            return;
           case 'escape':
             sendInput('\x1b');
             break;

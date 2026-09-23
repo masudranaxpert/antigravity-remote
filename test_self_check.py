@@ -565,6 +565,7 @@ try {{
             assert "smoothScrollDuration: 0" in term_js, "Expected smoothScrollDuration: 0 to prevent scroll animation stutter"
             assert "term.scrollLines(rows)" in term_js, "Expected unified touch scrolling in normal buffer"
             assert "case 'enter':" in term_js, "Expected case 'enter' in accessory bar switch"
+            assert "function triggerEnter" in term_js, "Expected synchronized triggerEnter helper for mobile Enter"
 
         with open(os.path.join(repo_dir, "app", "terminal.py"), "r", encoding="utf-8") as f_pty:
             pty_py = f_pty.read()
