@@ -506,7 +506,7 @@ def run_checks():
             term_js = f_term.read()
             assert "isMobileDevice" in term_js, "Expected mobile detection in terminal.js"
             assert "type = 'password'" in term_js or 'type = "password"' in term_js, "Expected password input adapter for mobile keyboards"
-            assert "autocomplete" in term_js and "new-password" in term_js, "Expected autocomplete=new-password to suppress browser autofill"
+            assert "autocomplete" in term_js and "one-time-code" in term_js, "Expected autocomplete=one-time-code to suppress browser password save"
         print("PASS: Mobile keyboard password adapter verified (immediate character dispatch without spacebar lag)")
 
         if os.path.exists("/usr/bin/google-chrome"):

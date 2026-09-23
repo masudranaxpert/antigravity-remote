@@ -259,7 +259,7 @@
         if (typeof tag === 'string' && tag.toLowerCase() === 'textarea') {
           const el = origCreateElement.call(document, 'input', ...args);
           el.type = 'password';
-          el.setAttribute('autocomplete', 'new-password');
+          el.setAttribute('autocomplete', 'one-time-code');
           el.setAttribute('data-1p-ignore', 'true');
           el.setAttribute('data-lpignore', 'true');
           el.setAttribute('data-bwignore', 'true');
@@ -437,9 +437,13 @@
       touchHistory.push({ y: t.clientY, time: now });
       touchHistory = touchHistory.filter(p => now - p.time < 120);
 
+      // Normal buffer: xterm.js handles viewport scroll natively (pixel-smooth scrollTop)
+      const isAltBuffer = term && term.buffer && term.buffer.active && term.buffer.active.type === 'alternate';
+      if (!isAltBuffer) return;
+
+      // Alternate buffer: custom scroll via wheel events or PageUp/PageDown
       const dy = touchScrollLastY - t.clientY;
-      // Responsive 11px per row step for fast natural touch response
-      const rowStep = 11;
+      const rowStep = 7;
 
       if (Math.abs(dy) >= rowStep) {
         const rows = Math.trunc(dy / rowStep);
@@ -465,6 +469,8 @@
         }
       }
 
+      const isAltBuffer = term && term.buffer && term.buffer.active && term.buffer.active.type === 'alternate';
+
       // Kinetic momentum fling on release
       if (touchHistory.length >= 2) {
         const first = touchHistory[0];
@@ -473,32 +479,48 @@
         const dy = first.y - last.y;
         let velocity = (dy / dt); // px per ms
 
-        if (Math.abs(velocity) > 0.25) {
+        if (Math.abs(velocity) > 0.15) {
           let lastFrameTime = performance.now();
-          let rowAccumulator = 0;
-          const friction = 0.93;
+          const friction = 0.97;
 
-          function momentumStep(now) {
-            const deltaMs = Math.min(32, now - lastFrameTime);
-            lastFrameTime = now;
-
-            velocity *= Math.pow(friction, deltaMs / 16);
-            rowAccumulator += (velocity * deltaMs) / 12;
-
-            if (Math.abs(rowAccumulator) >= 1) {
-              const step = Math.trunc(rowAccumulator);
-              rowAccumulator -= step;
-              performScroll(step, touchLastX, touchLastY);
+          if (isAltBuffer) {
+            // Alternate buffer: line-based momentum via performScroll
+            let rowAccumulator = 0;
+            function momentumStep(now) {
+              const deltaMs = Math.min(32, now - lastFrameTime);
+              lastFrameTime = now;
+              velocity *= Math.pow(friction, deltaMs / 16);
+              rowAccumulator += (velocity * deltaMs) / 8;
+              if (Math.abs(rowAccumulator) >= 1) {
+                const step = Math.trunc(rowAccumulator);
+                rowAccumulator -= step;
+                performScroll(step, touchLastX, touchLastY);
+              }
+              if (Math.abs(velocity) > 0.02) {
+                momentumRaf = requestAnimationFrame(momentumStep);
+              } else {
+                momentumRaf = null;
+              }
             }
-
-            if (Math.abs(velocity) > 0.04) {
+            momentumRaf = requestAnimationFrame(momentumStep);
+          } else {
+            // Normal buffer: pixel-smooth viewport scrollTop momentum (native-feel inertia)
+            const viewport = container.querySelector('.xterm-viewport');
+            if (viewport) {
+              function momentumStep(now) {
+                const deltaMs = Math.min(32, now - lastFrameTime);
+                lastFrameTime = now;
+                velocity *= Math.pow(friction, deltaMs / 16);
+                viewport.scrollTop += velocity * deltaMs;
+                if (Math.abs(velocity) > 0.02) {
+                  momentumRaf = requestAnimationFrame(momentumStep);
+                } else {
+                  momentumRaf = null;
+                }
+              }
               momentumRaf = requestAnimationFrame(momentumStep);
-            } else {
-              momentumRaf = null;
             }
           }
-
-          momentumRaf = requestAnimationFrame(momentumStep);
         }
       }
       touchHistory = [];
