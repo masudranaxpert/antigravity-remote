@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Antigravity Remote - Web Terminal</title>
   <link rel="icon" type="image/png" href="/static/icon.png">
   <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
@@ -33,6 +33,8 @@
       </div>
 
       <div class="header-right">
+        <button type="button" class="tool-btn" id="kbd-toggle-btn" title="Toggle Soft Keyboard" aria-label="Toggle Keyboard">⌨</button>
+        <button type="button" class="tool-btn" id="composer-toggle-btn" title="Command Composer / Dictation" aria-label="Command Composer">✏️</button>
         <button type="button" class="tool-btn" id="font-decrease-btn" title="Decrease Font Size" aria-label="Decrease Font Size">A-</button>
         <button type="button" class="tool-btn" id="font-increase-btn" title="Increase Font Size" aria-label="Increase Font Size">A+</button>
         <button type="button" class="tool-btn" id="reconnect-btn" title="Reconnect Terminal" aria-label="Reconnect Terminal">
@@ -50,6 +52,17 @@
       </div>
     </header>
 
+    <!-- Slide-down Command Composer Drawer (Mobile Dictation & Text Input) -->
+    <div class="composer-drawer" id="composer-drawer" hidden>
+      <div class="composer-inner">
+        <textarea id="composer-input" class="composer-textarea" rows="2" placeholder="Type or dictate command..." autocorrect="off" autocapitalize="none" autocomplete="off" spellcheck="false"></textarea>
+        <div class="composer-controls">
+          <button type="button" class="composer-btn send" id="composer-send-btn">Send ⏎</button>
+          <button type="button" class="composer-btn close" id="composer-close-btn" aria-label="Close Composer">✕</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Quick Commands Bar (Fast Mobile Shortcuts) -->
     <div class="quick-commands-bar" id="quick-commands-bar" aria-label="Quick Command Shortcuts">
       <button type="button" class="quick-chip" tabindex="-1" data-cmd="git status&#10;">git status</button>
@@ -65,6 +78,11 @@
     <!-- Active Terminal Canvas Mount Area -->
     <main class="terminal-main" id="terminal-main">
       <div id="terminal-container" class="terminal-canvas-wrap"></div>
+      <button type="button" class="scroll-bottom-btn" id="scroll-bottom-btn" title="Scroll to Bottom" aria-label="Scroll to Bottom" hidden>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
     </main>
 
     <!-- Mobile Virtual Keyboard Accessory Touch Bar -->
@@ -82,8 +100,9 @@
         <button type="button" class="acc-btn symbol" tabindex="-1" data-raw="_" title="Underscore (_)">_</button>
         <button type="button" class="acc-btn symbol" tabindex="-1" data-raw="|" title="Pipe (|)">|</button>
         <button type="button" class="acc-btn action" tabindex="-1" data-action="paste" title="Paste from Clipboard (📋)">📋</button>
-        <button type="button" class="acc-btn action" tabindex="-1" data-action="copy" title="Copy Selection or Current Line (📑)">📑</button>
+        <button type="button" class="acc-btn action" tabindex="-1" data-action="copy" title="Copy or Select Output (📑)">📑</button>
         <button type="button" class="acc-btn toggle" tabindex="-1" id="ctrl-toggle-btn" title="Toggle Sticky Ctrl">CTRL</button>
+        <button type="button" class="acc-btn toggle" tabindex="-1" id="alt-toggle-btn" title="Toggle Sticky Alt">ALT</button>
         <button type="button" class="acc-btn action" tabindex="-1" data-key="ctrl-c" title="Interrupt (Ctrl+C)">^C</button>
         <button type="button" class="acc-btn action" tabindex="-1" data-key="ctrl-d" title="EOF / Exit (Ctrl+D)">^D</button>
         <button type="button" class="acc-btn action" tabindex="-1" data-key="ctrl-l" title="Clear Screen (Ctrl+L)">^L</button>
@@ -94,6 +113,27 @@
       </div>
     </nav>
   </div>
+
+  <!-- Mobile Native Text Selection & Copy Overlay Modal -->
+  <aside class="select-overlay" id="select-overlay" hidden aria-label="Select and Copy Overlay">
+    <div class="select-overlay-header">
+      <div class="select-overlay-title">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        <span>Select / Copy Buffer</span>
+      </div>
+      <div class="select-overlay-actions">
+        <button type="button" class="select-btn primary" id="select-copy-btn">Copy</button>
+        <button type="button" class="select-btn" id="select-copy-all-btn">Copy All</button>
+        <button type="button" class="select-btn close" id="select-close-btn">Done</button>
+      </div>
+    </div>
+    <div class="select-overlay-body" id="select-overlay-body">
+      <pre class="select-overlay-pre" id="select-overlay-pre"></pre>
+    </div>
+  </aside>
 
   <script src="/static/vendor/xterm/xterm.js"></script>
   <script src="/static/vendor/xterm/xterm-addon-fit.js"></script>

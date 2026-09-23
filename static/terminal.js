@@ -10,6 +10,7 @@
   let fitAddon = null;
   let ws = null;
   let isCtrlActive = false;
+  let isAltActive = false;
   let currentFontSize = 13;
   let reconnectTimer = null;
   let toastTimer = null;
@@ -17,6 +18,15 @@
   let reconnectAttempts = 0;
   let isManuallyClosed = false;
   const MAX_RECONNECT_ATTEMPTS = 15;
+
+  // Lightweight haptic vibration feedback for mobile touches
+  function triggerHaptic(duration = 12) {
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try {
+        navigator.vibrate(duration);
+      } catch (_) {}
+    }
+  }
 
   // Visual Studio Dark Palette for xterm.js
   const STUDIO_THEME = {
@@ -247,12 +257,116 @@
         if (term.textarea) term.textarea.value = '';
         return;
       }
+
+      if (isAltActive && data.length >= 1) {
+        // Apply sticky Alt modifier (prefix with ESC \x1b)
+        setAltActive(false);
+        sendInput('\x1b' + data);
+        if (term.textarea) term.textarea.value = '';
+        return;
+      }
+
       sendInput(data);
       // Clean hidden textarea buffer so mobile keyboard doesn't accumulate state or misdiff punctuation
       if (term.textarea) {
         term.textarea.value = '';
       }
     });
+
+    // Mobile tap-to-focus and long-press (550ms) to open native Select Mode overlay
+    let touchStartTime = 0;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let longPressTimer = null;
+
+    container.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      touchStartX = t.clientX;
+      touchStartY = t.clientY;
+      touchStartTime = Date.now();
+
+      clearTimeout(longPressTimer);
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        triggerHaptic(25);
+        openSelectMode();
+      }, 550);
+    }, { passive: true });
+
+    container.addEventListener('touchmove', (e) => {
+      if (!longPressTimer) return;
+      const t = e.touches[0];
+      if (t && Math.hypot(t.clientX - touchStartX, t.clientY - touchStartY) > 10) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    }, { passive: true });
+
+    container.addEventListener('touchend', (e) => {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+      // If tap was short (< 250ms) and within threshold, focus terminal
+      if (Date.now() - touchStartTime < 250 && e.changedTouches.length === 1) {
+        const end = e.changedTouches[0];
+        if (Math.hypot(end.clientX - touchStartX, end.clientY - touchStartY) <= 8) {
+          if (term && term.textarea) {
+            term.textarea.focus({ preventScroll: true });
+          }
+        }
+      }
+    });
+
+    container.addEventListener('touchcancel', () => {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    });
+
+    // Alt-screen touch scrolling: In htop, vim, nano, translate vertical swipes into arrow keys
+    let altScrollStartY = 0;
+    let altScrollLastY = 0;
+    container.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        altScrollStartY = e.touches[0].clientY;
+        altScrollLastY = altScrollStartY;
+      }
+    }, { passive: true });
+
+    container.addEventListener('touchmove', (e) => {
+      if (!term || e.touches.length !== 1) return;
+      if (term.buffer && term.buffer.active && term.buffer.active.type === 'alternate') {
+        const y = e.touches[0].clientY;
+        const dy = altScrollLastY - y;
+        if (Math.abs(dy) >= 18) {
+          if (dy > 0) {
+            sendInput('\x1b[B'); // Down arrow
+          } else {
+            sendInput('\x1b[A'); // Up arrow
+          }
+          altScrollLastY = y;
+        }
+      }
+    }, { passive: true });
+
+    // Floating Scroll-to-Bottom button setup
+    const scrollBottomBtn = document.getElementById('scroll-bottom-btn');
+    if (scrollBottomBtn) {
+      scrollBottomBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerHaptic(12);
+        if (term) {
+          term.scrollToBottom();
+          scrollBottomBtn.hidden = true;
+        }
+      });
+
+      term.onScroll(() => {
+        const buf = term.buffer.active;
+        const isAtBottom = buf.viewportY >= buf.baseY;
+        scrollBottomBtn.hidden = isAtBottom;
+      });
+    }
   }
 
   function connectWebSocket() {
@@ -335,6 +449,18 @@
     }
   }
 
+  function setAltActive(active) {
+    isAltActive = active;
+    const btn = document.getElementById('alt-toggle-btn');
+    if (btn) {
+      if (isAltActive) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    }
+  }
+
   function attachTapHandler(container, selector, onTrigger) {
     let startX = 0;
     let startY = 0;
@@ -361,6 +487,7 @@
       // Require pointerup on same element as pointerdown to avoid swipe-through
       if (!el || el !== activeEl) return;
       e.preventDefault();
+      triggerHaptic(10);
       onTrigger(el);
       activeEl = null;
     });
@@ -378,6 +505,7 @@
   }
 
   async function handlePaste() {
+    triggerHaptic(12);
     try {
       if (navigator.clipboard && navigator.clipboard.readText) {
         const text = await navigator.clipboard.readText();
@@ -398,30 +526,158 @@
     if (term) term.focus();
   }
 
-  async function handleCopy() {
-    let text = term ? term.getSelection() : '';
-    if (!text && term) {
+  // Opens native mobile text selection overlay snapshotting active terminal buffer
+  function openSelectMode() {
+    if (!term) return;
+    const overlay = document.getElementById('select-overlay');
+    const pre = document.getElementById('select-overlay-pre');
+    if (!overlay || !pre) return;
+
+    const buf = term.buffer.active;
+    const lines = [];
+    for (let i = 0; i < buf.length; i++) {
+      const line = buf.getLine(i);
+      if (!line) continue;
+      const text = line.translateToString(true);
+      if (line.isWrapped && lines.length) {
+        lines[lines.length - 1] += text;
+      } else {
+        lines.push(text);
+      }
+    }
+    while (lines.length && !lines[lines.length - 1].trim()) {
+      lines.pop();
+    }
+
+    pre.textContent = lines.join('\n');
+    overlay.hidden = false;
+    const body = document.getElementById('select-overlay-body');
+    if (body) {
+      body.scrollTop = body.scrollHeight;
+    }
+  }
+
+  function closeSelectMode() {
+    const overlay = document.getElementById('select-overlay');
+    if (overlay) overlay.hidden = true;
+    if (term && term.textarea) {
+      term.textarea.focus({ preventScroll: true });
+    }
+  }
+
+  async function copySelectModeContent(allOnly = false) {
+    const pre = document.getElementById('select-overlay-pre');
+    if (!pre) return;
+    const domSelection = window.getSelection() ? window.getSelection().toString() : '';
+    const textToCopy = (!allOnly && domSelection) ? domSelection : (pre.textContent || '');
+    if (!textToCopy) {
+      showToast('No text available to copy', 'info');
+      return;
+    }
+
+    let copied = false;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
       try {
-        const buf = term.buffer.active;
-        const line = buf.getLine(buf.baseY + buf.cursorY);
-        if (line) text = line.translateToString(true).trim();
+        await navigator.clipboard.writeText(textToCopy);
+        copied = true;
       } catch (_) {}
     }
-    if (text) {
+    if (!copied) {
       try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(text);
-          showToast(`Copied ${text.length} chars to clipboard`, 'ok');
-        } else {
-          showToast('Clipboard write unavailable', 'err');
-        }
-      } catch (_) {
-        showToast('Clipboard permission denied', 'err');
-      }
-    } else {
-      showToast('No text available to copy', 'info');
+        const ta = document.createElement('textarea');
+        ta.value = textToCopy;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        copied = true;
+      } catch (_) {}
     }
-    if (term) term.focus();
+
+    if (copied) {
+      triggerHaptic(15);
+      showToast(`Copied ${textToCopy.length} characters`, 'ok');
+    } else {
+      showToast('Copy failed or permission denied', 'err');
+    }
+  }
+
+  async function handleCopy() {
+    triggerHaptic(12);
+    // If xterm has an active mouse/desktop selection, copy it directly
+    if (term && term.hasSelection()) {
+      const selection = term.getSelection();
+      if (selection) {
+        let copied = false;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          try {
+            await navigator.clipboard.writeText(selection);
+            copied = true;
+          } catch (_) {}
+        }
+        if (!copied) {
+          try {
+            const ta = document.createElement('textarea');
+            ta.value = selection;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            copied = true;
+          } catch (_) {}
+        }
+        if (copied) {
+          showToast(`Copied ${selection.length} chars to clipboard`, 'ok');
+          if (term) term.focus();
+          return;
+        }
+      }
+    }
+
+    // On mobile touch devices without selection, open native Select Mode overlay
+    openSelectMode();
+  }
+
+  function toggleSoftKeyboard() {
+    if (!term || !term.textarea) return;
+    triggerHaptic(12);
+    const isFocused = (document.activeElement === term.textarea);
+    if (isFocused) {
+      term.textarea.blur();
+      showToast('Keyboard dismissed', 'info');
+    } else {
+      term.textarea.focus({ preventScroll: true });
+      showToast('Keyboard focused', 'ok');
+    }
+  }
+
+  function toggleComposer(forceState) {
+    const drawer = document.getElementById('composer-drawer');
+    const input = document.getElementById('composer-input');
+    if (!drawer) return;
+    const shouldOpen = (forceState !== undefined) ? forceState : drawer.hidden;
+    drawer.hidden = !shouldOpen;
+    triggerHaptic(10);
+    if (shouldOpen && input) {
+      setTimeout(() => input.focus(), 80);
+    } else if (!shouldOpen && term && term.textarea) {
+      term.textarea.focus({ preventScroll: true });
+    }
+  }
+
+  function sendComposerCommand() {
+    const input = document.getElementById('composer-input');
+    if (!input) return;
+    const rawVal = input.value;
+    if (!rawVal) return;
+    triggerHaptic(15);
+    sendInput(sanitizeTerminalInput(rawVal) + '\r');
+    input.value = '';
+    toggleComposer(false);
   }
 
   function initAccessoryBar() {
@@ -435,6 +691,11 @@
 
       if (btn.id === 'ctrl-toggle-btn') {
         setCtrlActive(!isCtrlActive);
+        return;
+      }
+
+      if (btn.id === 'alt-toggle-btn') {
+        setAltActive(!isAltActive);
         return;
       }
 
@@ -456,8 +717,6 @@
 
       switch (key) {
         case 'escape':
-          // Single ESC; do NOT call term.focus() here — xterm focus events
-          // arrive via PTY and can interrupt the TUI's 20ms escape timeout.
           sendInput('\x1b');
           return;
         case 'enter':
@@ -505,6 +764,7 @@
     attachTapHandler(bar, '.quick-chip', (chip) => {
       const cmd = chip.getAttribute('data-cmd');
       if (cmd) {
+        triggerHaptic(12);
         sendInput(cmd);
         if (term) term.focus();
       }
@@ -515,6 +775,7 @@
     const reconnectBtn = document.getElementById('reconnect-btn');
     if (reconnectBtn) {
       reconnectBtn.addEventListener('click', () => {
+        triggerHaptic(12);
         reconnectAttempts = 0;
         isManuallyClosed = false;
         clearTimeout(reconnectTimer);
@@ -524,9 +785,71 @@
       });
     }
 
+    const kbdToggleBtn = document.getElementById('kbd-toggle-btn');
+    if (kbdToggleBtn) {
+      kbdToggleBtn.addEventListener('click', () => {
+        toggleSoftKeyboard();
+      });
+    }
+
+    const composerToggleBtn = document.getElementById('composer-toggle-btn');
+    if (composerToggleBtn) {
+      composerToggleBtn.addEventListener('click', () => {
+        toggleComposer();
+      });
+    }
+
+    const composerCloseBtn = document.getElementById('composer-close-btn');
+    if (composerCloseBtn) {
+      composerCloseBtn.addEventListener('click', () => {
+        toggleComposer(false);
+      });
+    }
+
+    const composerSendBtn = document.getElementById('composer-send-btn');
+    if (composerSendBtn) {
+      composerSendBtn.addEventListener('click', () => {
+        sendComposerCommand();
+      });
+    }
+
+    const composerInput = document.getElementById('composer-input');
+    if (composerInput) {
+      composerInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendComposerCommand();
+        }
+      });
+    }
+
+    // Native Select Overlay Actions
+    const selectCopyBtn = document.getElementById('select-copy-btn');
+    if (selectCopyBtn) {
+      selectCopyBtn.addEventListener('click', () => {
+        copySelectModeContent(false);
+      });
+    }
+
+    const selectCopyAllBtn = document.getElementById('select-copy-all-btn');
+    if (selectCopyAllBtn) {
+      selectCopyAllBtn.addEventListener('click', () => {
+        copySelectModeContent(true);
+      });
+    }
+
+    const selectCloseBtn = document.getElementById('select-close-btn');
+    if (selectCloseBtn) {
+      selectCloseBtn.addEventListener('click', () => {
+        triggerHaptic(10);
+        closeSelectMode();
+      });
+    }
+
     const fontDec = document.getElementById('font-decrease-btn');
     if (fontDec) {
       fontDec.addEventListener('click', () => {
+        triggerHaptic(10);
         if (currentFontSize > 10 && term) {
           currentFontSize -= 1;
           term.options.fontSize = currentFontSize;
@@ -541,6 +864,7 @@
     const fontInc = document.getElementById('font-increase-btn');
     if (fontInc) {
       fontInc.addEventListener('click', () => {
+        triggerHaptic(10);
         if (currentFontSize < 22 && term) {
           currentFontSize += 1;
           term.options.fontSize = currentFontSize;

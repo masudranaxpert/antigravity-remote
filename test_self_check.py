@@ -255,6 +255,12 @@ def run_checks():
             assert 'data-key="backspace"' in t_body_auth, "Expected backspace button in terminal template"
             assert 'data-raw="."' in t_body_auth, "Expected dot button in terminal template"
             assert 'data-raw=".."' in t_body_auth, "Expected double dot button in terminal template"
+            assert 'id="alt-toggle-btn"' in t_body_auth, "Expected Alt modifier toggle button in terminal template"
+            assert 'id="kbd-toggle-btn"' in t_body_auth, "Expected keyboard toggle button in terminal template"
+            assert 'id="composer-drawer"' in t_body_auth, "Expected composer drawer in terminal template"
+            assert 'id="scroll-bottom-btn"' in t_body_auth, "Expected scroll to bottom button in terminal template"
+            assert 'id="select-overlay"' in t_body_auth, "Expected select overlay in terminal template"
+            assert 'viewport-fit=cover' in t_body_auth, "Expected viewport-fit=cover in terminal template"
         print("PASS: /terminal endpoint securely gated by authentication & mobile touch accessories verified (Zero FOUC)")
 
         # H. Live WebSocket terminal interactive session check

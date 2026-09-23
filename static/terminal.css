@@ -253,8 +253,8 @@ html, body {
 .accessory-touch-bar {
   display: flex;
   align-items: center;
-  height: 44px;
-  padding: 0 6px;
+  min-height: 44px;
+  padding: 0 max(6px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
   background-color: var(--surface);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
@@ -267,7 +267,7 @@ html, body {
   gap: 6px;
   width: 100%;
   overflow-x: auto;
-  padding: 2px 2px;
+  padding: 4px 2px;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x;
 }
@@ -303,7 +303,7 @@ html, body {
 .acc-btn:active {
   background-color: var(--surface-hover);
   border-color: var(--border-strong);
-  transform: scale(0.94);
+  transform: scale(0.92);
 }
 
 .acc-btn.special {
@@ -327,6 +327,7 @@ html, body {
   background-color: var(--accent-bg);
   border-color: var(--accent);
   color: var(--accent);
+  box-shadow: 0 0 6px var(--accent-border);
 }
 
 /* Floating Toast Notifications */
@@ -388,4 +389,250 @@ html, body {
 .xterm .composition-view,
 .xterm .composition-view.active {
   display: none !important;
+}
+
+/* Slide-down Command Composer Drawer */
+.composer-drawer {
+  background-color: var(--surface);
+  border-bottom: 1px solid var(--border-strong);
+  padding: 8px 12px;
+  flex-shrink: 0;
+  z-index: 25;
+  animation: composerSlideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.composer-drawer[hidden] {
+  display: none !important;
+}
+
+@keyframes composerSlideDown {
+  from {
+    transform: translateY(-8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.composer-inner {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.composer-textarea {
+  flex: 1;
+  min-height: 44px;
+  max-height: 110px;
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 8px 10px;
+  resize: vertical;
+  outline: none;
+  -webkit-appearance: none;
+}
+
+.composer-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-bg);
+}
+
+.composer-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: stretch;
+}
+
+.composer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  border: 1px solid transparent;
+  transition: all 0.12s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.composer-btn.send {
+  background-color: var(--accent);
+  color: #0b1120;
+  flex: 1;
+}
+
+.composer-btn.send:active {
+  transform: scale(0.96);
+  filter: brightness(0.9);
+}
+
+.composer-btn.close {
+  background-color: var(--surface-raised);
+  border-color: var(--border);
+  color: var(--text-secondary);
+  height: 22px;
+}
+
+.composer-btn.close:active {
+  background-color: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* Floating Scroll-to-Bottom Button */
+.scroll-bottom-btn {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 15;
+  transition: transform 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+  outline: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.scroll-bottom-btn[hidden] {
+  display: none !important;
+}
+
+.scroll-bottom-btn:hover {
+  background-color: var(--surface-hover);
+  border-color: var(--accent-border);
+}
+
+.scroll-bottom-btn:active {
+  transform: scale(0.92);
+}
+
+/* Mobile Native Text Selection & Copy Overlay */
+.select-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background-color: var(--bg);
+  display: flex;
+  flex-direction: column;
+  animation: selectOverlayFadeIn 0.15s ease;
+}
+
+.select-overlay[hidden] {
+  display: none !important;
+}
+
+@keyframes selectOverlayFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.select-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: env(safe-area-inset-top, 0px) 12px 0 12px;
+  background-color: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.select-overlay-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.select-overlay-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.select-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.12s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.select-btn.primary {
+  background-color: var(--accent);
+  color: #0b1120;
+  font-weight: 600;
+  border-color: transparent;
+}
+
+.select-btn.primary:active {
+  transform: scale(0.95);
+  filter: brightness(0.9);
+}
+
+.select-btn.close {
+  background-color: var(--surface-raised);
+  color: var(--text-secondary);
+}
+
+.select-btn:active {
+  transform: scale(0.95);
+}
+
+.select-overlay-body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+  -webkit-overflow-scrolling: touch;
+}
+
+.select-overlay-pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
