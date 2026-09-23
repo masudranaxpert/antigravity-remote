@@ -77,6 +77,46 @@ def get_battery_status():
         return None
 
 
+QUOTA_CACHE_TTL = 180  # 3-minute quota cache lifetime in seconds
+_QUOTA_CACHE = {
+    "accounts": None,
+    "current_email": None,
+    "current_id": None,
+    "remote_info": None,
+    "timestamp": 0,
+}
+
+
+def get_cached_accounts_and_remote(force_refresh=False):
+    """Retrieve accounts quota and remote info from 3-minute in-memory cache, or refresh."""
+    now = time.time()
+    is_expired = (now - _QUOTA_CACHE["timestamp"]) >= QUOTA_CACHE_TTL
+    is_empty = _QUOTA_CACHE["accounts"] is None
+    if force_refresh or is_empty or is_expired:
+        accounts, current_email, current_id = load_accounts()
+        remote_info = get_official_remote_info(current_email)
+        _QUOTA_CACHE["accounts"] = accounts
+        _QUOTA_CACHE["current_email"] = current_email
+        _QUOTA_CACHE["current_id"] = current_id
+        _QUOTA_CACHE["remote_info"] = remote_info
+        _QUOTA_CACHE["timestamp"] = now
+        cached = False
+    else:
+        accounts = _QUOTA_CACHE["accounts"]
+        current_email = _QUOTA_CACHE["current_email"]
+        current_id = _QUOTA_CACHE["current_id"]
+        remote_info = _QUOTA_CACHE["remote_info"]
+        cached = True
+
+    return accounts, current_email, current_id, remote_info, int(_QUOTA_CACHE["timestamp"]), cached
+
+
+def invalidate_quota_cache():
+    """Invalidate in-memory quota cache to force fresh read on next request."""
+    _QUOTA_CACHE["timestamp"] = 0
+    _QUOTA_CACHE["accounts"] = None
+
+
 def load_state():
     """Load persistent mobile token and settings from state.json with static.json fallback."""
     data = {}
@@ -465,8 +505,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return self.send_json({"need_login": True}, 401)
 
             record_client_access(self.headers, self.client_address, path, "GET", 200, True, "ok")
-            accounts, current_email, current_id = load_accounts()
-            remote_info = get_official_remote_info(current_email)
+            query = parse_qs(parsed.query)
+            force_refresh = (
+                query.get("refresh_quota", ["0"])[0] in ("1", "true")
+                or query.get("force_refresh", ["0"])[0] in ("1", "true")
+            )
+            accounts, current_email, current_id, remote_info, quota_ts, was_cached = get_cached_accounts_and_remote(
+                force_refresh=force_refresh
+            )
             remote_url = remote_info.get("url", "")
 
             # Reconcile sleep inhibitor with desired state configuration
@@ -490,6 +536,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "terminal_enabled": bool(st.get("terminal_enabled", True)),
                 "totp_enabled": bool(st.get("totp_enabled", False)),
                 "battery": get_battery_status(),
+                "quota_cached": was_cached,
+                "quota_updated_at": quota_ts,
             })
 
         if path == "/api/audit/logs":
@@ -613,6 +661,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return self.send_json({"success": False, "error": "missing account_id"}, 400)
 
             success, msg = apply_switch(account_id, target_ide)
+            if success:
+                invalidate_quota_cache()
             record_client_access(self.headers, self.client_address, path, "POST", 200 if success else 500, True, f"switch_account_{account_id}")
             return self.send_json({
                 "success": success,

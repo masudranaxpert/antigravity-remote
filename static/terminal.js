@@ -138,6 +138,18 @@
     }, delay);
   }
 
+  // Sanitizes mobile smart punctuation (curly quotes, em-dashes, non-breaking spaces) to raw ASCII
+  function sanitizeTerminalInput(data) {
+    if (!data) return data;
+    return data
+      .replace(/[\u2018\u2019]/g, "'") // Smart single quotes ‘ ’ -> '
+      .replace(/[\u201c\u201d]/g, '"') // Smart double quotes “ ” -> "
+      .replace(/\u2014/g, '--')        // Em-dash — -> --
+      .replace(/\u2013/g, '-')         // En-dash – -> -
+      .replace(/\u2026/g, '...')       // Ellipsis … -> ...
+      .replace(/\u00a0/g, ' ');        // Non-breaking space \u00a0 -> space
+  }
+
   function initTerminal() {
     const container = document.getElementById('terminal-container');
     if (!container) return;
@@ -161,6 +173,25 @@
     }
 
     term.open(container);
+
+    // Hardening the hidden mobile textarea against Gboard predictive composition and autocorrect
+    if (term.textarea) {
+      term.textarea.setAttribute('autocapitalize', 'none');
+      term.textarea.setAttribute('autocorrect', 'off');
+      term.textarea.setAttribute('autocomplete', 'off');
+      term.textarea.setAttribute('spellcheck', 'false');
+      // inputmode="search" neutralizes word-prediction dictionaries on mobile keyboards (Gboard/Samsung/iOS)
+      term.textarea.setAttribute('inputmode', 'search');
+      term.textarea.setAttribute('enterkeyhint', 'go');
+
+      // Intercept mobile Backspace deleteContentBackward event to guarantee deletion in shell
+      term.textarea.addEventListener('beforeinput', (e) => {
+        if (e.inputType === 'deleteContentBackward') {
+          sendInput('\x7f');
+          e.preventDefault();
+        }
+      });
+    }
 
     // Disable SGR and DEC mouse reporting modes to eliminate garbage clicks (e.g. 35;9;3M)
     term.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l');
@@ -188,6 +219,8 @@
       if (data.startsWith('\x1b[<') || data.startsWith('\x1b[M')) {
         return;
       }
+
+      data = sanitizeTerminalInput(data);
 
       if (isCtrlActive && data.length === 1) {
         // Apply sticky Ctrl modifier to single character
@@ -328,6 +361,53 @@
     });
   }
 
+  async function handlePaste() {
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          sendInput(sanitizeTerminalInput(text));
+          showToast('Pasted from clipboard', 'ok');
+        } else {
+          showToast('Clipboard is empty', 'info');
+        }
+      } else {
+        const manual = prompt('Paste text to send to terminal:');
+        if (manual) sendInput(sanitizeTerminalInput(manual));
+      }
+    } catch (_) {
+      const manual = prompt('Paste text to send to terminal:');
+      if (manual) sendInput(sanitizeTerminalInput(manual));
+    }
+    if (term) term.focus();
+  }
+
+  async function handleCopy() {
+    let text = term ? term.getSelection() : '';
+    if (!text && term) {
+      try {
+        const buf = term.buffer.active;
+        const line = buf.getLine(buf.baseY + buf.cursorY);
+        if (line) text = line.translateToString(true).trim();
+      } catch (_) {}
+    }
+    if (text) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+          showToast(`Copied ${text.length} chars to clipboard`, 'ok');
+        } else {
+          showToast('Clipboard write unavailable', 'err');
+        }
+      } catch (_) {
+        showToast('Clipboard permission denied', 'err');
+      }
+    } else {
+      showToast('No text available to copy', 'info');
+    }
+    if (term) term.focus();
+  }
+
   function initAccessoryBar() {
     const bar = document.getElementById('accessory-bar');
     if (!bar) return;
@@ -335,9 +415,20 @@
     attachTapHandler(bar, 'button', (btn) => {
       const key = btn.getAttribute('data-key');
       const raw = btn.getAttribute('data-raw');
+      const action = btn.getAttribute('data-action');
 
       if (btn.id === 'ctrl-toggle-btn') {
         setCtrlActive(!isCtrlActive);
+        return;
+      }
+
+      if (action === 'paste') {
+        handlePaste();
+        return;
+      }
+
+      if (action === 'copy') {
+        handleCopy();
         return;
       }
 
@@ -355,6 +446,9 @@
           return;
         case 'enter':
           sendInput('\r');
+          break;
+        case 'backspace':
+          sendInput('\x7f');
           break;
         case 'tab':
           sendInput('\t');
@@ -442,12 +536,17 @@
       });
     }
 
-    // Window and visualViewport resize listener
+    // Debounced window and visualViewport resize listener (prevents SIGWINCH spam during keyboard animation)
+    let resizeDebounceTimer = null;
     const handleResize = () => {
-      if (fitAddon && term) {
-        fitAddon.fit();
-        sendResize(term.cols, term.rows);
-      }
+      clearTimeout(resizeDebounceTimer);
+      resizeDebounceTimer = setTimeout(() => {
+        if (fitAddon && term) {
+          fitAddon.fit();
+          sendResize(term.cols, term.rows);
+          term.scrollToBottom();
+        }
+      }, 180);
     };
 
     window.addEventListener('resize', handleResize);

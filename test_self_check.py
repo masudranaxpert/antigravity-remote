@@ -161,19 +161,33 @@ def run_checks():
         with urllib.request.urlopen(req, timeout=3) as resp:
             body = resp.read().decode("utf-8")
             assert "Antigravity Mobile Switcher" in body, "Expected dashboard template for authenticated request"
+            assert "quota-refresh-btn" in body, "Expected quota refresh button in dashboard template"
             cookie = resp.headers.get("Set-Cookie", "")
             assert "mrt=" in cookie, f"Expected Set-Cookie header with mrt token, got {cookie}"
-        print("PASS: Authenticated GET /?token=... serves dashboard and sets cookie")
+        print("PASS: Authenticated GET /?token=... serves dashboard with quota-refresh-btn and sets cookie")
 
 
-        # D. GET /api/state includes audio & sleep telemetry
+        # D. GET /api/state includes audio & sleep telemetry and in-memory quota caching
         req = urllib.request.Request(f"http://127.0.0.1:{test_port}/api/state", headers={"Cookie": f"mrt={token}"})
         with urllib.request.urlopen(req, timeout=3) as resp:
             state = json.loads(resp.read().decode("utf-8"))
             assert "audio" in state, "Missing audio in /api/state"
             assert state["audio"]["supported"] is True, "Audio should be supported on host"
             assert "prevent_sleep" in state, "Missing prevent_sleep in /api/state"
-        print(f"PASS: /api/state telemetry includes audio and prevent_sleep ({state['prevent_sleep']})")
+            assert "quota_cached" in state, "Missing quota_cached flag in /api/state"
+            assert "quota_updated_at" in state, "Missing quota_updated_at in /api/state"
+
+        # Verify second call is served from in-memory cache
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            state2 = json.loads(resp.read().decode("utf-8"))
+            assert state2["quota_cached"] is True, "Expected second consecutive call to be served from in-memory cache"
+
+        # Verify force refresh bypasses cache
+        req_force = urllib.request.Request(f"http://127.0.0.1:{test_port}/api/state?refresh_quota=1", headers={"Cookie": f"mrt={token}"})
+        with urllib.request.urlopen(req_force, timeout=3) as resp:
+            state3 = json.loads(resp.read().decode("utf-8"))
+            assert state3["quota_cached"] is False, "Expected force refresh to bypass cache"
+        print(f"PASS: /api/state telemetry (audio, prevent_sleep) and in-memory quota caching lifecycle verified")
 
         # E. POST /api/audio/mute toggles mute state and returns updated audio
         req = urllib.request.Request(
@@ -236,7 +250,10 @@ def run_checks():
             t_body_auth = resp.read().decode("utf-8")
             assert "terminal-container" in t_body_auth, "Expected terminal template for authenticated request"
             assert "xterm.js" in t_body_auth, "Expected xterm script tags in terminal template"
-        print("PASS: /terminal endpoint securely gated by authentication (Zero FOUC)")
+            assert 'data-action="paste"' in t_body_auth, "Expected paste button in terminal template"
+            assert 'data-action="copy"' in t_body_auth, "Expected copy button in terminal template"
+            assert 'data-key="backspace"' in t_body_auth, "Expected backspace button in terminal template"
+        print("PASS: /terminal endpoint securely gated by authentication & mobile touch accessories verified (Zero FOUC)")
 
         # H. Live WebSocket terminal interactive session check
         import socket

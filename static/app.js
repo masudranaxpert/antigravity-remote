@@ -241,9 +241,11 @@
     syncTime.textContent = 'Synced ' + format12HourTime(now);
 
     // Host PC Connection badge
+    const hostPill = document.getElementById('host-status-pill');
     if (pcDot && pcStatusText) {
       pcDot.className = 'status-dot active';
       pcStatusText.textContent = 'PC Online';
+      if (hostPill) hostPill.classList.add('active');
     }
 
     // Battery chip — separate element, never mutates the label
@@ -260,24 +262,30 @@
         const isLow      = pct <= 20 && !isCharging;
         const isCrit     = pct <= 10 && !isCharging;
 
-        // Bolt when charger in, battery icon otherwise
+        // Bolt when charger in, minimal battery body otherwise
         const icon = isCharging
-          ? `<svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true" class="bat-bolt"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`
+          ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true" class="bat-bolt"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`
           : `<svg width="12" height="10" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="bat-ico"><rect x="1" y="2" width="18" height="12" rx="2"/><path d="M20 6v4"/></svg>`;
 
         const stateClass = isCrit ? 'bat-critical' : isLow ? 'bat-low' : isCharging ? 'bat-charging' : '';
         batBadge.className = `bat-badge${stateClass ? ' ' + stateClass : ''}`;
         batBadge.innerHTML = `${icon}${pct}%`;
         batBadge.removeAttribute('hidden');
-        batBadge.title = `Battery ${pct}% — ${isCharging ? 'Plugged in' : st}`;
+        batBadge.title = `Battery ${pct}% — ${isCharging ? 'Plugged in (Charging/Full)' : st}`;
 
         // Tint pill border to match state
-        const pill = document.getElementById('host-status-pill');
-        if (pill) {
-          pill.style.borderColor = isCharging ? 'rgba(52,211,153,0.35)' : isCrit ? 'rgba(248,113,113,0.35)' : isLow ? 'rgba(251,191,36,0.3)' : '';
+        if (hostPill) {
+          hostPill.style.borderColor = isCharging
+            ? 'rgba(52,211,153,0.35)'
+            : isCrit
+            ? 'rgba(248,113,113,0.4)'
+            : isLow
+            ? 'rgba(251,191,36,0.35)'
+            : '';
         }
       } else {
         batBadge.setAttribute('hidden', '');
+        if (hostPill) hostPill.style.borderColor = '';
       }
     }
 
@@ -593,13 +601,30 @@
     }
   }
 
-  // Data Loading Coordinator
-  async function loadStateData(isManual = false) {
-    const refreshBtn = document.getElementById('refresh-btn');
-    if (isManual && refreshBtn) refreshBtn.classList.add('spinning');
+  let isQuotaRefreshing = false;
 
-    const data = await apiRequest('/api/state');
+  // Data Loading Coordinator
+  async function loadStateData(isManual = false, forceQuota = false) {
+    const refreshBtn = document.getElementById('refresh-btn');
+    const quotaRefreshBtn = document.getElementById('quota-refresh-btn');
+
+    if (isManual && refreshBtn) refreshBtn.classList.add('spinning');
+    if (forceQuota && quotaRefreshBtn) {
+      quotaRefreshBtn.classList.add('spinning');
+      quotaRefreshBtn.disabled = true;
+    }
+
+    const endpoint = forceQuota ? '/api/state?refresh_quota=1' : '/api/state';
+    const data = await apiRequest(endpoint);
+
     if (refreshBtn) refreshBtn.classList.remove('spinning');
+    if (quotaRefreshBtn) {
+      quotaRefreshBtn.classList.remove('spinning');
+      setTimeout(() => {
+        if (quotaRefreshBtn) quotaRefreshBtn.disabled = false;
+        isQuotaRefreshing = false;
+      }, 4000); // 4s anti-spam cooldown
+    }
 
     if (!data) {
       const pcDot = document.getElementById('pc-dot');
@@ -611,7 +636,10 @@
       const bb = document.getElementById('bat-badge');
       if (bb) bb.setAttribute('hidden', '');
       const pill = document.getElementById('host-status-pill');
-      if (pill) pill.style.borderColor = '';
+      if (pill) {
+        pill.classList.remove('active');
+        pill.style.borderColor = '';
+      }
       return;
     }
 
@@ -626,7 +654,9 @@
     }
 
     renderDashboard(data);
-    if (isManual) {
+    if (forceQuota) {
+      showToast('Account quotas refreshed from host', 'ok');
+    } else if (isManual) {
       showToast('Host state synchronized', 'info');
     }
   }
@@ -635,7 +665,16 @@
   function initEvents() {
     const refreshBtn = document.getElementById('refresh-btn');
     if (refreshBtn) {
-      refreshBtn.addEventListener('click', () => loadStateData(true));
+      refreshBtn.addEventListener('click', () => loadStateData(true, true));
+    }
+
+    const quotaRefreshBtn = document.getElementById('quota-refresh-btn');
+    if (quotaRefreshBtn) {
+      quotaRefreshBtn.addEventListener('click', () => {
+        if (isQuotaRefreshing) return;
+        isQuotaRefreshing = true;
+        loadStateData(true, true);
+      });
     }
 
     const logoutBtn = document.getElementById('logout-btn');
@@ -738,7 +777,7 @@
   // Boot sequence
   document.addEventListener('DOMContentLoaded', () => {
     initEvents();
-    loadStateData(false);
-    autoRefreshTimer = setInterval(() => loadStateData(false), 45000);
+    loadStateData(false, false);
+    autoRefreshTimer = setInterval(() => loadStateData(false, false), 35000);
   });
 })();
