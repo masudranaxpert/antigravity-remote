@@ -224,7 +224,8 @@ class ClientConn:
         self.q = queue.Queue(maxsize=256)
         self.alive = True
         try:
-            self.sock.settimeout(10)
+            # 60s idle timeout prevents false drops while client sends 15s heartbeats
+            self.sock.settimeout(60)
         except Exception:
             pass
         self._sender_thread = threading.Thread(target=self._sender_loop, daemon=True)

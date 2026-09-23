@@ -557,6 +557,7 @@ try {{
             copy_idx = html_content.find('data-action="copy"')
             assert paste_idx != -1 and enter_idx != -1 and copy_idx != -1, "Expected paste, enter, and copy buttons"
             assert paste_idx < enter_idx < copy_idx, "Expected Enter button immediately after Paste button"
+            assert 'data-key="page-up"' in html_content and 'data-key="page-down"' in html_content, "Expected Page Up/Down buttons"
 
         with open(os.path.join(repo_dir, "static", "terminal.js"), "r", encoding="utf-8") as f_term:
             term_js = f_term.read()
@@ -566,10 +567,13 @@ try {{
             assert "term.scrollLines(rows)" in term_js, "Expected unified touch scrolling in normal buffer"
             assert "case 'enter':" in term_js, "Expected case 'enter' in accessory bar switch"
             assert "function triggerEnter" in term_js, "Expected synchronized triggerEnter helper for mobile Enter"
+            assert "case 'page-up':" in term_js and "case 'page-down':" in term_js, "Expected PageUp/Down key handlers"
+            assert "WheelEvent" in term_js, "Expected WheelEvent dispatch for accurate cell-level mouse scrolling in OpenCode"
 
         with open(os.path.join(repo_dir, "app", "terminal.py"), "r", encoding="utf-8") as f_pty:
             pty_py = f_pty.read()
             assert "CLAUDE_CODE_NO_FLICKER" in pty_py and "NO_FLICKER" in pty_py, "Expected anti-flicker environment variables in PTY"
+            assert "settimeout(60)" in pty_py, "Expected 60s socket timeout to eliminate 10s idle disconnection flickering"
 
         print("PASS: Enter button order, backspace auto-repeat, anti-flicker, and opencode touch scrolling verified")
 

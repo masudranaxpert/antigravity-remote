@@ -398,15 +398,22 @@
             // Fullscreen TUI mode (opencode, vim, less, htop)
             const hasMouse = Boolean(term.modes && term.modes.mouseTracking && term.modes.mouseTracking !== 'none');
             if (hasMouse) {
-              const wheelCode = rows > 0 ? 65 : 64; // 64 = Up, 65 = Down
+              const target = container.querySelector('.xterm-screen') || container.querySelector('.xterm-viewport') || container;
               for (let i = 0; i < Math.abs(rows); i++) {
-                sendInput(`\x1b[<${wheelCode};1;1M`);
+                const wheelEv = new WheelEvent('wheel', {
+                  deltaY: rows > 0 ? 100 : -100,
+                  clientX: t.clientX,
+                  clientY: t.clientY,
+                  bubbles: true,
+                  cancelable: true
+                });
+                target.dispatchEvent(wheelEv);
               }
             } else {
-              // Standard TUI without mouse reporting: scroll via arrow keys
-              const arrow = rows > 0 ? getArrowKey('B') : getArrowKey('A');
+              // Standard TUI without mouse reporting: scroll via PageUp/PageDown
+              const keySeq = rows > 0 ? '\x1b[6~' : '\x1b[5~';
               for (let i = 0; i < Math.abs(rows); i++) {
-                sendInput(arrow);
+                sendInput(keySeq);
               }
             }
           } else {
@@ -666,7 +673,7 @@
     function isRepeatable(el) {
       if (!el) return false;
       const key = el.getAttribute('data-key');
-      return key === 'backspace' || key === 'arrow-left' || key === 'arrow-right' || key === 'arrow-up' || key === 'arrow-down';
+      return key === 'backspace' || key === 'arrow-left' || key === 'arrow-right' || key === 'arrow-up' || key === 'arrow-down' || key === 'page-up' || key === 'page-down';
     }
 
     container.addEventListener('pointerdown', (e) => {
@@ -903,6 +910,7 @@
 
   function triggerEnter() {
     let handled = false;
+    const isFocused = Boolean(term && term.textarea && document.activeElement === term.textarea);
     if (term && term.textarea) {
       try {
         term.textarea.value = '';
@@ -920,7 +928,9 @@
         }
       } catch (_) {}
       term.textarea.value = '';
-      term.textarea.focus({ preventScroll: true });
+      if (isFocused) {
+        term.textarea.focus({ preventScroll: true });
+      }
     }
     if (!handled) {
       sendInput('\r');
@@ -961,7 +971,6 @@
 
       if (raw) {
         sendInput(raw);
-        if (term && term.textarea) term.textarea.focus({ preventScroll: true });
         return;
       }
 
@@ -985,6 +994,20 @@
           case 'ctrl-d':
             sendInput('\x04');
             break;
+          case 'page-up':
+            if (term && term.buffer && term.buffer.active && term.buffer.active.type === 'normal') {
+              term.scrollPages(-1);
+            } else {
+              sendInput('\x1b[5~');
+            }
+            break;
+          case 'page-down':
+            if (term && term.buffer && term.buffer.active && term.buffer.active.type === 'normal') {
+              term.scrollPages(1);
+            } else {
+              sendInput('\x1b[6~');
+            }
+            break;
           case 'arrow-up':
             sendInput(getArrowKey('A'));
             break;
@@ -998,7 +1021,6 @@
             sendInput(getArrowKey('D'));
             break;
         }
-        if (term && term.textarea) term.textarea.focus({ preventScroll: true });
       }
     });
   }
