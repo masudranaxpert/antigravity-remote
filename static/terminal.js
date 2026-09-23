@@ -175,10 +175,23 @@
     }
   }
 
+  let lastFitWidth = 0;
+  let lastFitHeight = 0;
+
   function debouncedFit(delay = 180) {
     clearTimeout(debouncedFitTimer);
     debouncedFitTimer = setTimeout(() => {
       if (fitAddon && term) {
+        const container = document.getElementById('terminal-container');
+        if (container) {
+          const w = container.clientWidth;
+          const h = container.clientHeight;
+          if (lastFitWidth > 0 && Math.abs(w - lastFitWidth) < 6 && Math.abs(h - lastFitHeight) < 10) {
+            return;
+          }
+          lastFitWidth = w;
+          lastFitHeight = h;
+        }
         fitAddon.fit();
         sendResize(term.cols, term.rows);
       }
@@ -224,8 +237,8 @@
       cursorWidth: 2,
       scrollback: 5000,
       tabStopWidth: 4,
-      allowTransparency: true,
-      smoothScrollDuration: 100,
+      allowTransparency: false,
+      smoothScrollDuration: 0,
     });
 
     if (window.FitAddon && window.FitAddon.FitAddon) {
@@ -343,7 +356,7 @@
     let touchStartTime = 0;
     let touchStartX = 0;
     let touchStartY = 0;
-    let altScrollLastY = 0;
+    let touchScrollLastY = 0;
     let longPressTimer = null;
 
     container.addEventListener('touchstart', (e) => {
@@ -352,8 +365,8 @@
       const t = e.touches[0];
       touchStartX = t.clientX;
       touchStartY = t.clientY;
+      touchScrollLastY = touchStartY;
       touchStartTime = Date.now();
-      altScrollLastY = touchStartY;
 
       clearTimeout(longPressTimer);
       longPressTimer = setTimeout(() => {
@@ -373,19 +386,39 @@
         longPressTimer = null;
       }
 
-      // Alt-screen wheel scrolling if mouse reporting is active
-      if (term && term.buffer && term.buffer.active && term.buffer.active.type === 'alternate') {
-        const hasMouse = Boolean(term.modes && term.modes.mouseTracking && term.modes.mouseTracking !== 'none');
-        if (hasMouse) {
-          const dy = altScrollLastY - t.clientY;
-          if (Math.abs(dy) >= 20) {
-            const wheelCode = dy > 0 ? 65 : 64; // 64 = Up, 65 = Down
-            sendInput(`\x1b[<${wheelCode};1;1M`);
-            altScrollLastY = t.clientY;
+      const dy = touchScrollLastY - t.clientY;
+      const rowStep = 18;
+
+      if (Math.abs(dy) >= rowStep) {
+        const rows = Math.trunc(dy / rowStep);
+        touchScrollLastY += rows * rowStep;
+
+        if (term && term.buffer && term.buffer.active) {
+          if (term.buffer.active.type === 'alternate') {
+            // Fullscreen TUI mode (opencode, vim, less, htop)
+            const hasMouse = Boolean(term.modes && term.modes.mouseTracking && term.modes.mouseTracking !== 'none');
+            if (hasMouse) {
+              const wheelCode = rows > 0 ? 65 : 64; // 64 = Up, 65 = Down
+              for (let i = 0; i < Math.abs(rows); i++) {
+                sendInput(`\x1b[<${wheelCode};1;1M`);
+              }
+            } else {
+              // Standard TUI without mouse reporting: scroll via arrow keys
+              const arrow = rows > 0 ? getArrowKey('B') : getArrowKey('A');
+              for (let i = 0; i < Math.abs(rows); i++) {
+                sendInput(arrow);
+              }
+            }
+          } else {
+            // Normal buffer: scroll terminal viewport lines
+            term.scrollLines(rows);
           }
         }
+        if (e.cancelable) {
+          e.preventDefault();
+        }
       }
-    }, { passive: true });
+    }, { passive: false });
 
     container.addEventListener('touchend', (e) => {
       lastTouchTime = Date.now();
@@ -615,36 +648,86 @@
     let startY = 0;
     let isDrag = false;
     let activeEl = null;
+    let holdTimer = null;
+    let repeatInterval = null;
+    let hasRepeated = false;
+
+    function clearHold() {
+      clearTimeout(holdTimer);
+      clearInterval(repeatInterval);
+      holdTimer = null;
+      repeatInterval = null;
+      if (activeEl) {
+        activeEl.classList.remove('holding');
+      }
+    }
+
+    function isRepeatable(el) {
+      if (!el) return false;
+      const key = el.getAttribute('data-key');
+      return key === 'backspace' || key === 'arrow-left' || key === 'arrow-right' || key === 'arrow-up' || key === 'arrow-down';
+    }
 
     container.addEventListener('pointerdown', (e) => {
       const el = e.target.closest(selector);
       if (el) {
         e.preventDefault();
       }
+      clearHold();
       isDrag = false;
+      hasRepeated = false;
       startX = e.clientX;
       startY = e.clientY;
       activeEl = el;
+
+      if (isRepeatable(el)) {
+        holdTimer = setTimeout(() => {
+          if (!isDrag && activeEl === el) {
+            hasRepeated = true;
+            el.classList.add('holding');
+            triggerHaptic(12);
+            onTrigger(el);
+            repeatInterval = setInterval(() => {
+              if (activeEl === el) {
+                triggerHaptic(6);
+                onTrigger(el);
+              } else {
+                clearHold();
+              }
+            }, 55);
+          }
+        }, 280);
+      }
     });
 
     container.addEventListener('pointermove', (e) => {
       if (!isDrag && Math.hypot(e.clientX - startX, e.clientY - startY) > 8) {
         isDrag = true;
+        clearHold();
       }
     });
 
     container.addEventListener('pointerup', (e) => {
-      if (isDrag || !activeEl) return;
       const el = e.target.closest(selector);
+      const wasHolding = hasRepeated;
+      clearHold();
+      if (isDrag || !activeEl) return;
       if (!el || el !== activeEl) return;
       e.preventDefault();
-      onTrigger(el);
+      if (!wasHolding) {
+        onTrigger(el);
+      }
       activeEl = null;
     });
 
     container.addEventListener('pointercancel', () => {
+      clearHold();
       isDrag = false;
       activeEl = null;
+    });
+
+    container.addEventListener('pointerleave', () => {
+      clearHold();
     });
 
     container.addEventListener('click', (e) => {
@@ -851,6 +934,9 @@
 
       if (key) {
         switch (key) {
+          case 'enter':
+            sendInput('\r');
+            break;
           case 'escape':
             sendInput('\x1b');
             break;

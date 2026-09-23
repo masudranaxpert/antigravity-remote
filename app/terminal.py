@@ -194,6 +194,8 @@ def spawn_shell_pty(rows: int = 24, cols: int = 80):
         env["HOME"] = home
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
+        env["CLAUDE_CODE_NO_FLICKER"] = "1"
+        env["NO_FLICKER"] = "1"
 
         # Preserve existing UTF-8 locale if present, else fallback cleanly to C.UTF-8
         current_lang = env.get("LANG", "")

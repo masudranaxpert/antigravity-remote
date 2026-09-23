@@ -548,6 +548,30 @@ try {{
                 if os.path.exists(t_name):
                     os.unlink(t_name)
 
+        # Verify Enter button in terminal.html, auto-repeat for backspace, anti-flicker flags, and unified touch scroll
+        with open(os.path.join(repo_dir, "templates", "terminal.html"), "r", encoding="utf-8") as f_html:
+            html_content = f_html.read()
+            assert 'data-key="enter"' in html_content, "Expected Enter button on touch bar"
+            paste_idx = html_content.find('data-action="paste"')
+            enter_idx = html_content.find('data-key="enter"')
+            copy_idx = html_content.find('data-action="copy"')
+            assert paste_idx != -1 and enter_idx != -1 and copy_idx != -1, "Expected paste, enter, and copy buttons"
+            assert paste_idx < enter_idx < copy_idx, "Expected Enter button immediately after Paste button"
+
+        with open(os.path.join(repo_dir, "static", "terminal.js"), "r", encoding="utf-8") as f_term:
+            term_js = f_term.read()
+            assert "isRepeatable" in term_js and "repeatInterval" in term_js, "Expected backspace/arrow auto-repeat on hold"
+            assert "allowTransparency: false" in term_js, "Expected allowTransparency: false to prevent canvas flickering"
+            assert "smoothScrollDuration: 0" in term_js, "Expected smoothScrollDuration: 0 to prevent scroll animation stutter"
+            assert "term.scrollLines(rows)" in term_js, "Expected unified touch scrolling in normal buffer"
+            assert "case 'enter':" in term_js, "Expected case 'enter' in accessory bar switch"
+
+        with open(os.path.join(repo_dir, "app", "terminal.py"), "r", encoding="utf-8") as f_pty:
+            pty_py = f_pty.read()
+            assert "CLAUDE_CODE_NO_FLICKER" in pty_py and "NO_FLICKER" in pty_py, "Expected anti-flicker environment variables in PTY"
+
+        print("PASS: Enter button order, backspace auto-repeat, anti-flicker, and opencode touch scrolling verified")
+
         # I. Invalid token rejection check
         try:
             bad_req = urllib.request.Request(f"http://127.0.0.1:{test_port}/api/state", headers={"Cookie": "mrt=invalid_token_12345"})
