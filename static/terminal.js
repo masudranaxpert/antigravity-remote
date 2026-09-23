@@ -11,7 +11,6 @@
   let ws = null;
   let isCtrlActive = false;
   let isAltActive = false;
-  let isComposing = false;
   let currentFontSize = 13;
   let reconnectTimer = null;
   let toastTimer = null;
@@ -234,7 +233,34 @@
       term.loadAddon(fitAddon);
     }
 
+    // Mobile soft keyboards (Gboard/Android/iOS) treat standard textareas as IME composition targets,
+    // buffering typed words until the spacebar is pressed. Swapping xterm's internal helper element
+    // to input[type=password] disables predictive composition and streams every keystroke immediately.
+    const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+                           ('ontouchstart' in window) ||
+                           (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+
+    const origCreateElement = document.createElement;
+    if (isMobileDevice) {
+      document.createElement = function (tag, ...args) {
+        if (typeof tag === 'string' && tag.toLowerCase() === 'textarea') {
+          const el = origCreateElement.call(document, 'input', ...args);
+          el.type = 'password';
+          el.setAttribute('autocomplete', 'new-password');
+          el.setAttribute('data-1p-ignore', 'true');
+          el.setAttribute('data-lpignore', 'true');
+          el.setAttribute('data-bwignore', 'true');
+          return el;
+        }
+        return origCreateElement.call(document, tag, ...args);
+      };
+    }
+
     term.open(container);
+
+    if (isMobileDevice) {
+      document.createElement = origCreateElement;
+    }
 
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(() => {
@@ -244,78 +270,26 @@
       fitAddon.fit();
     }
 
-    // Hardening mobile helper textarea against unwanted autocorrect
+    // Configure mobile helper element against unwanted autocorrect
     if (term.textarea) {
       term.textarea.setAttribute('autocapitalize', 'none');
       term.textarea.setAttribute('autocorrect', 'off');
-      term.textarea.setAttribute('autocomplete', 'off');
       term.textarea.setAttribute('spellcheck', 'false');
-      term.textarea.removeAttribute('inputmode');
       term.textarea.setAttribute('enterkeyhint', 'go');
 
-      let lastKeyDownCode = 0;
-      const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || ('ontouchstart' in window);
-
-      term.textarea.addEventListener('keydown', (e) => {
-        lastKeyDownCode = e.keyCode;
-      });
-
-      term.textarea.addEventListener('compositionstart', () => {
-        isComposing = true;
-      });
-
-      term.textarea.addEventListener('compositionend', () => {
-        isComposing = false;
-        setTimeout(() => {
-          if (term.textarea && !isComposing) term.textarea.value = '';
-        }, 0);
-      });
-
-      // Intercept beforeinput to handle Backspace, Enter, typing & word replacements cleanly
+      // Intercept empty-buffer backspace & linebreaks on mobile soft keyboards
       term.textarea.addEventListener('beforeinput', (e) => {
         if (e.inputType === 'deleteContentBackward') {
-          sendInput('\x7f');
-          e.preventDefault();
-          term.textarea.value = '';
+          // When the helper has no text to delete, soft keyboard won't fire keydown.
+          // Dispatch \x7f directly to shell so mobile backspace always deletes.
+          if (!term.textarea.value) {
+            sendInput('\x7f');
+            e.preventDefault();
+          }
         } else if (e.inputType === 'insertLineBreak') {
           sendInput('\r');
           e.preventDefault();
           term.textarea.value = '';
-        } else if (e.inputType === 'insertReplacementText') {
-          // Autocorrect or Gboard suggestion replacement
-          let newText = (e.dataTransfer ? e.dataTransfer.getData('text/plain') : e.data) || '';
-          newText = sanitizeTerminalInput(newText);
-          let deleteCount = 1;
-          if (typeof e.getTargetRanges === 'function') {
-            const ranges = e.getTargetRanges();
-            if (ranges && ranges.length > 0) {
-              deleteCount = Math.max(1, ranges[0].endOffset - ranges[0].startOffset);
-            }
-          }
-          sendInput('\x7f'.repeat(deleteCount) + newText);
-          e.preventDefault();
-          term.textarea.value = '';
-        } else if (e.inputType === 'insertText' || e.inputType === 'insertCompositionText') {
-          // Android Gboard / soft keyboard uses keyCode 229 / composition which stalls xterm onData
-          if (e.data && (lastKeyDownCode === 229 || e.isComposing || isMobileDevice)) {
-            let text = sanitizeTerminalInput(e.data);
-            if (isCtrlActive && text.length === 1) {
-              const code = text.charCodeAt(0);
-              let ctrlChar = text;
-              if (code >= 64 && code <= 95) ctrlChar = String.fromCharCode(code - 64);
-              else if (code >= 97 && code <= 122) ctrlChar = String.fromCharCode(code - 96);
-              setCtrlActive(false);
-              sendInput(ctrlChar);
-            } else if (isAltActive && text.length === 1) {
-              setAltActive(false);
-              sendInput('\x1b' + text);
-            } else {
-              sendInput(text);
-            }
-            e.preventDefault();
-            term.textarea.value = '';
-            lastKeyDownCode = 0;
-          }
         }
       });
     }
@@ -331,7 +305,7 @@
       return true;
     });
 
-    // Process keystrokes typed by user
+    // Process keystrokes typed by user natively via xterm.js
     term.onData((data) => {
       // Filter out synthetic mouse tracking events triggered by mobile screen taps
       if (data.startsWith('\x1b[<') || data.startsWith('\x1b[M')) {
@@ -353,14 +327,12 @@
         }
         setCtrlActive(false);
         sendInput(ctrlChar);
-        if (term.textarea && !isComposing) term.textarea.value = '';
         return;
       }
 
       if (isAltActive && data.length === 1) {
         setAltActive(false);
         sendInput('\x1b' + data);
-        if (term.textarea && !isComposing) term.textarea.value = '';
         return;
       }
 

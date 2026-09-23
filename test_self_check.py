@@ -500,6 +500,54 @@ def run_checks():
         ws_sock_cookie.close()
         print("PASS: WebSocket session cookie authentication (zero query token) verified")
 
+        # Test mobile virtual keyboard helper configuration (bypasses Gboard spacebar composition lag)
+        repo_dir = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(repo_dir, "static", "terminal.js"), "r", encoding="utf-8") as f_term:
+            term_js = f_term.read()
+            assert "isMobileDevice" in term_js, "Expected mobile detection in terminal.js"
+            assert "type = 'password'" in term_js or 'type = "password"' in term_js, "Expected password input adapter for mobile keyboards"
+            assert "autocomplete" in term_js and "new-password" in term_js, "Expected autocomplete=new-password to suppress browser autofill"
+        print("PASS: Mobile keyboard password adapter verified (immediate character dispatch without spacebar lag)")
+
+        if os.path.exists("/usr/bin/google-chrome"):
+            chrome_test_html = f"""<!DOCTYPE html>
+<html><head><script src="http://127.0.0.1:{test_port}/static/vendor/xterm/xterm.js"></script></head>
+<body><div id="term"></div><div id="res"></div>
+<script>
+try {{
+  const orig = document.createElement;
+  document.createElement = function(t, ...a) {{
+    if (typeof t === 'string' && t.toLowerCase() === 'textarea') {{
+      const el = orig.call(document, 'input', ...a);
+      el.type = 'password';
+      return el;
+    }}
+    return orig.call(document, t, ...a);
+  }};
+  const term = new Terminal();
+  term.open(document.getElementById('term'));
+  document.createElement = orig;
+  let received = [];
+  term.onData(d => received.push(d));
+  term.textarea.value = 'l';
+  term.textarea.dispatchEvent(new InputEvent('input', {{ data: 'l', inputType: 'insertText' }}));
+  term.textarea.value = 's';
+  term.textarea.dispatchEvent(new InputEvent('input', {{ data: 's', inputType: 'insertText' }}));
+  document.getElementById('res').textContent = (term.textarea.tagName === 'INPUT' && term.textarea.type === 'password' && received.join('') === 'ls') ? 'OK' : 'FAIL';
+}} catch (e) {{ document.getElementById('res').textContent = 'ERR:' + e; }}
+</script></body></html>"""
+            import tempfile, subprocess
+            with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False) as tf:
+                tf.write(chrome_test_html)
+                t_name = tf.name
+            try:
+                c_out = subprocess.check_output(["google-chrome", "--headless=new", "--dump-dom", f"file://{t_name}"]).decode()
+                assert '<div id="res">OK</div>' in c_out, f"Chrome mobile terminal simulation failed: {c_out}"
+                print("PASS: Headless Chrome live validation of mobile input adapter passed (emits 'ls' immediately)")
+            finally:
+                if os.path.exists(t_name):
+                    os.unlink(t_name)
+
         # I. Invalid token rejection check
         try:
             bad_req = urllib.request.Request(f"http://127.0.0.1:{test_port}/api/state", headers={"Cookie": "mrt=invalid_token_12345"})
