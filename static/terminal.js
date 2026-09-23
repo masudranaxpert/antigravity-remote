@@ -352,21 +352,65 @@
       sendInput(data);
     });
 
-    // Unified Mobile Touch Gestures on Terminal Container
+    // Unified Mobile Touch Gestures on Terminal Container with Kinetic Momentum Scrolling
     let touchStartTime = 0;
     let touchStartX = 0;
     let touchStartY = 0;
     let touchScrollLastY = 0;
+    let touchLastX = 0;
+    let touchLastY = 0;
     let longPressTimer = null;
+    let momentumRaf = null;
+    let touchHistory = [];
+
+    function cancelMomentum() {
+      if (momentumRaf) {
+        cancelAnimationFrame(momentumRaf);
+        momentumRaf = null;
+      }
+    }
+
+    function performScroll(rows, clientX, clientY) {
+      if (!term || !term.buffer || !term.buffer.active || rows === 0) return;
+      if (term.buffer.active.type === 'alternate') {
+        const hasMouse = Boolean(term.modes && term.modes.mouseTracking && term.modes.mouseTracking !== 'none');
+        if (hasMouse) {
+          const target = container.querySelector('.xterm-screen') || container.querySelector('.xterm-viewport') || container;
+          for (let i = 0; i < Math.abs(rows); i++) {
+            const wheelEv = new WheelEvent('wheel', {
+              deltaY: rows > 0 ? 100 : -100,
+              clientX: clientX,
+              clientY: clientY,
+              bubbles: true,
+              cancelable: true
+            });
+            target.dispatchEvent(wheelEv);
+          }
+        } else {
+          // Standard TUI without mouse reporting: scroll via PageUp/PageDown
+          const keySeq = rows > 0 ? '\x1b[6~' : '\x1b[5~';
+          for (let i = 0; i < Math.abs(rows); i++) {
+            sendInput(keySeq);
+          }
+        }
+      } else {
+        // Normal buffer: scroll terminal viewport lines
+        term.scrollLines(rows);
+      }
+    }
 
     container.addEventListener('touchstart', (e) => {
       lastTouchTime = Date.now();
+      cancelMomentum();
       if (e.touches.length !== 1) return;
       const t = e.touches[0];
       touchStartX = t.clientX;
       touchStartY = t.clientY;
       touchScrollLastY = touchStartY;
+      touchLastX = touchStartX;
+      touchLastY = touchStartY;
       touchStartTime = Date.now();
+      touchHistory = [{ y: t.clientY, time: touchStartTime }];
 
       clearTimeout(longPressTimer);
       longPressTimer = setTimeout(() => {
@@ -381,46 +425,26 @@
       lastTouchTime = Date.now();
       if (e.touches.length !== 1) return;
       const t = e.touches[0];
+      touchLastX = t.clientX;
+      touchLastY = t.clientY;
+
       if (Math.hypot(t.clientX - touchStartX, t.clientY - touchStartY) > 10) {
         clearTimeout(longPressTimer);
         longPressTimer = null;
       }
 
+      const now = Date.now();
+      touchHistory.push({ y: t.clientY, time: now });
+      touchHistory = touchHistory.filter(p => now - p.time < 120);
+
       const dy = touchScrollLastY - t.clientY;
-      const rowStep = 18;
+      // Responsive 11px per row step for fast natural touch response
+      const rowStep = 11;
 
       if (Math.abs(dy) >= rowStep) {
         const rows = Math.trunc(dy / rowStep);
         touchScrollLastY += rows * rowStep;
-
-        if (term && term.buffer && term.buffer.active) {
-          if (term.buffer.active.type === 'alternate') {
-            // Fullscreen TUI mode (opencode, vim, less, htop)
-            const hasMouse = Boolean(term.modes && term.modes.mouseTracking && term.modes.mouseTracking !== 'none');
-            if (hasMouse) {
-              const target = container.querySelector('.xterm-screen') || container.querySelector('.xterm-viewport') || container;
-              for (let i = 0; i < Math.abs(rows); i++) {
-                const wheelEv = new WheelEvent('wheel', {
-                  deltaY: rows > 0 ? 100 : -100,
-                  clientX: t.clientX,
-                  clientY: t.clientY,
-                  bubbles: true,
-                  cancelable: true
-                });
-                target.dispatchEvent(wheelEv);
-              }
-            } else {
-              // Standard TUI without mouse reporting: scroll via PageUp/PageDown
-              const keySeq = rows > 0 ? '\x1b[6~' : '\x1b[5~';
-              for (let i = 0; i < Math.abs(rows); i++) {
-                sendInput(keySeq);
-              }
-            }
-          } else {
-            // Normal buffer: scroll terminal viewport lines
-            term.scrollLines(rows);
-          }
-        }
+        performScroll(rows, t.clientX, t.clientY);
         if (e.cancelable) {
           e.preventDefault();
         }
@@ -431,6 +455,7 @@
       lastTouchTime = Date.now();
       clearTimeout(longPressTimer);
       longPressTimer = null;
+
       if (Date.now() - touchStartTime < 250 && e.changedTouches.length === 1) {
         const end = e.changedTouches[0];
         if (Math.hypot(end.clientX - touchStartX, end.clientY - touchStartY) <= 8) {
@@ -439,11 +464,51 @@
           }
         }
       }
+
+      // Kinetic momentum fling on release
+      if (touchHistory.length >= 2) {
+        const first = touchHistory[0];
+        const last = touchHistory[touchHistory.length - 1];
+        const dt = Math.max(1, last.time - first.time);
+        const dy = first.y - last.y;
+        let velocity = (dy / dt); // px per ms
+
+        if (Math.abs(velocity) > 0.25) {
+          let lastFrameTime = performance.now();
+          let rowAccumulator = 0;
+          const friction = 0.93;
+
+          function momentumStep(now) {
+            const deltaMs = Math.min(32, now - lastFrameTime);
+            lastFrameTime = now;
+
+            velocity *= Math.pow(friction, deltaMs / 16);
+            rowAccumulator += (velocity * deltaMs) / 12;
+
+            if (Math.abs(rowAccumulator) >= 1) {
+              const step = Math.trunc(rowAccumulator);
+              rowAccumulator -= step;
+              performScroll(step, touchLastX, touchLastY);
+            }
+
+            if (Math.abs(velocity) > 0.04) {
+              momentumRaf = requestAnimationFrame(momentumStep);
+            } else {
+              momentumRaf = null;
+            }
+          }
+
+          momentumRaf = requestAnimationFrame(momentumStep);
+        }
+      }
+      touchHistory = [];
     }, { passive: true });
 
     container.addEventListener('touchcancel', () => {
       clearTimeout(longPressTimer);
       longPressTimer = null;
+      cancelMomentum();
+      touchHistory = [];
     });
 
     // Floating Scroll-to-Bottom button setup
