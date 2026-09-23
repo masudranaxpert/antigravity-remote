@@ -240,11 +240,33 @@
     const now = new Date();
     syncTime.textContent = 'Synced ' + format12HourTime(now);
 
-    // Host PC Connection (Server is responding on host machine)
+    // Host PC Connection + Battery status inline in the PC pill
     if (pcDot && pcStatusText) {
       pcDot.className = 'status-dot active';
-      pcStatusText.textContent = 'PC Online';
-      pcStatusText.style.color = 'var(--text-primary)';
+      const bat = data.battery;
+      if (bat && typeof bat.percent === 'number') {
+        const pct = bat.percent;
+        const st = bat.status; // Charging / Discharging / Full / Unknown
+        const isCharging = st === 'Charging';
+        const isFull = st === 'Full';
+        const isLow = pct <= 20 && !isCharging;
+        const isCritical = pct <= 10 && !isCharging;
+
+        // Icon: bolt for charging, battery outline otherwise
+        const icon = isCharging
+          ? `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true" class="bat-icon charging"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`
+          : `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="bat-icon"><rect x="2" y="7" width="18" height="11" rx="2"/><path d="M22 11v3"/></svg>`;
+
+        const colorClass = isCritical ? 'bat-critical' : isLow ? 'bat-low' : isCharging ? 'bat-charging' : isFull ? 'bat-full' : '';
+        const label = isCharging ? `Charging ${pct}%` : isFull ? `Full (${pct}%)` : `${pct}%`;
+
+        pcStatusText.innerHTML = `PC Online&nbsp;${icon}<span class="bat-pct ${colorClass}">${label}</span>`;
+        pcStatusText.style.color = '';
+        pcStatusText.title = `Battery: ${pct}% — ${st}`;
+      } else {
+        pcStatusText.textContent = 'PC Online';
+        pcStatusText.style.color = 'var(--text-primary)';
+      }
     }
 
     // Antigravity Desktop IDE Process Telemetry

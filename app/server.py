@@ -50,6 +50,26 @@ STATIC_PATH = os.path.join(BASE_DIR, "static.json")
 DEFAULT_PORT = 8077
 SESSION_MAX_AGE = 86400  # 24-hour session lifetime in seconds
 
+_POWER_SUPPLY = "/sys/class/power_supply"
+
+
+def get_battery_status():
+    """Read battery percentage and charging state from sysfs. Returns None if no battery."""
+    try:
+        entries = os.listdir(_POWER_SUPPLY)
+    except OSError:
+        return None
+    bat = next((e for e in sorted(entries) if e.startswith("BAT")), None)
+    if not bat:
+        return None
+    base = os.path.join(_POWER_SUPPLY, bat)
+    try:
+        pct = int(open(os.path.join(base, "capacity")).read().strip())
+        status = open(os.path.join(base, "status")).read().strip()  # Charging/Discharging/Full/Unknown
+        return {"percent": pct, "status": status}
+    except Exception:
+        return None
+
 
 def load_state():
     """Load persistent mobile token and settings from state.json with static.json fallback."""
@@ -463,6 +483,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "prevent_sleep": get_sleep_inhibit_status(),
                 "terminal_enabled": bool(st.get("terminal_enabled", True)),
                 "totp_enabled": bool(st.get("totp_enabled", False)),
+                "battery": get_battery_status(),
             })
 
         if path == "/api/audit/logs":

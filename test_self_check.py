@@ -155,13 +155,16 @@ def run_checks():
         st_now = load_state()
         token = st_now.get("mobile_token", "")
         otp_param = f"&otp={compute_totp(st_now.get('totp_secret', ''))}" if st_now.get("totp_enabled", False) else ""
-        req = urllib.request.Request(f"http://127.0.0.1:{test_port}/?token={token}{otp_param}")
+        import urllib.parse as _up
+        enc_token = _up.quote(token, safe="")  # Encode special chars (e.g. #) so they survive URL query string
+        req = urllib.request.Request(f"http://127.0.0.1:{test_port}/?token={enc_token}{otp_param}")
         with urllib.request.urlopen(req, timeout=3) as resp:
             body = resp.read().decode("utf-8")
             assert "Antigravity Mobile Switcher" in body, "Expected dashboard template for authenticated request"
             cookie = resp.headers.get("Set-Cookie", "")
             assert "mrt=" in cookie, f"Expected Set-Cookie header with mrt token, got {cookie}"
         print("PASS: Authenticated GET /?token=... serves dashboard and sets cookie")
+
 
         # D. GET /api/state includes audio & sleep telemetry
         req = urllib.request.Request(f"http://127.0.0.1:{test_port}/api/state", headers={"Cookie": f"mrt={token}"})
@@ -228,7 +231,7 @@ def run_checks():
             assert "Unlock Antigravity Remote" in t_body or "auth-token-input" in t_body, "Expected auth page for unauth /terminal"
             assert "terminal-container" not in t_body, "Terminal markup leaked into unauthenticated response"
 
-        req_term_auth = urllib.request.Request(f"http://127.0.0.1:{test_port}/terminal?token={token}{otp_param}")
+        req_term_auth = urllib.request.Request(f"http://127.0.0.1:{test_port}/terminal?token={enc_token}{otp_param}")
         with urllib.request.urlopen(req_term_auth, timeout=3) as resp:
             t_body_auth = resp.read().decode("utf-8")
             assert "terminal-container" in t_body_auth, "Expected terminal template for authenticated request"
@@ -240,7 +243,7 @@ def run_checks():
         ws_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         ws_sock.connect(("127.0.0.1", test_port))
         ws_req = (
-            f"GET /api/terminal/ws?token={token}{otp_param}&cols=80&rows=24 HTTP/1.1\r\n"
+            f"GET /api/terminal/ws?token={enc_token}{otp_param}&cols=80&rows=24 HTTP/1.1\r\n"
             f"Host: 127.0.0.1:{test_port}\r\n"
             "Upgrade: websocket\r\n"
             "Connection: Upgrade\r\n"
@@ -366,7 +369,7 @@ def run_checks():
         # J. Anti-Cookie-Theft & Device-Bound Session Security Check
         # Legitimate mobile device registers session
         legit_ua = "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 Chrome/120.0 Mobile"
-        legit_req = urllib.request.Request(f"http://127.0.0.1:{test_port}/?token={token}{otp_param}", headers={"User-Agent": legit_ua})
+        legit_req = urllib.request.Request(f"http://127.0.0.1:{test_port}/?token={enc_token}{otp_param}", headers={"User-Agent": legit_ua})
         with urllib.request.urlopen(legit_req, timeout=3) as resp:
             set_cookie_hdr = resp.headers.get("Set-Cookie", "")
             assert "mrt=v1." in set_cookie_hdr, f"Expected signed session token in Set-Cookie, got: {set_cookie_hdr}"
