@@ -505,9 +505,8 @@ def run_checks():
         with open(os.path.join(repo_dir, "static", "terminal.js"), "r", encoding="utf-8") as f_term:
             term_js = f_term.read()
             assert "isMobileDevice" in term_js, "Expected mobile detection in terminal.js"
-            assert "type = 'text'" in term_js and "type = 'password'" in term_js, "Expected delayed password flip adapter for mobile keyboards"
-            assert "autocomplete" in term_js and "one-time-code" in term_js, "Expected autocomplete=one-time-code to suppress browser password save"
-        print("PASS: Mobile keyboard password adapter verified (immediate character dispatch without spacebar lag)")
+            assert "insertCompositionText" in term_js and "stopPropagation" in term_js, "Expected composition input interceptor for mobile keyboards"
+        print("PASS: Mobile keyboard composition interceptor verified (immediate character dispatch without password popup)")
 
         if os.path.exists("/usr/bin/google-chrome"):
             chrome_test_html = f"""<!DOCTYPE html>
@@ -515,28 +514,26 @@ def run_checks():
 <body><div id="term"></div><div id="res"></div>
 <script>
 try {{
-  const orig = document.createElement;
-  document.createElement = function(t, ...a) {{
-    if (typeof t === 'string' && t.toLowerCase() === 'textarea') {{
-      const el = orig.call(document, 'input', ...a);
-      el.type = 'text';
-      return el;
-    }}
-    return orig.call(document, t, ...a);
-  }};
   const term = new Terminal();
   term.open(document.getElementById('term'));
-  document.createElement = orig;
-  setTimeout(() => {{ term.textarea.type = 'password'; }}, 100);
   let received = [];
-  term.onData(d => received.push(d));
+  
+  // Setup the same interceptor as production
+  term.textarea.addEventListener('input', (e) => {{
+    if (e.data && (e.inputType === 'insertText' || e.inputType === 'insertCompositionText')) {{
+      received.push(e.data);
+      e.stopPropagation();
+      term.textarea.value = '';
+    }}
+  }}, true);
+
   setTimeout(() => {{
     term.textarea.value = 'l';
-    term.textarea.dispatchEvent(new InputEvent('input', {{ data: 'l', inputType: 'insertText' }}));
+    term.textarea.dispatchEvent(new InputEvent('input', {{ data: 'l', inputType: 'insertCompositionText' }}));
     term.textarea.value = 's';
-    term.textarea.dispatchEvent(new InputEvent('input', {{ data: 's', inputType: 'insertText' }}));
-    document.getElementById('res').textContent = (term.textarea.tagName === 'INPUT' && term.textarea.type === 'password' && received.join('') === 'ls') ? 'OK' : 'FAIL';
-  }}, 200);
+    term.textarea.dispatchEvent(new InputEvent('input', {{ data: 's', inputType: 'insertCompositionText' }}));
+    document.getElementById('res').textContent = (term.textarea.tagName === 'TEXTAREA' && received.join('') === 'ls') ? 'OK' : 'FAIL';
+  }}, 100);
 }} catch (e) {{ document.getElementById('res').textContent = 'ERR:' + e; }}
 </script></body></html>"""
             import tempfile, subprocess

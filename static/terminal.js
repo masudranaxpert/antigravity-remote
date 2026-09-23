@@ -246,39 +246,11 @@
       term.loadAddon(fitAddon);
     }
 
-    // Mobile soft keyboards (Gboard/Android/iOS) treat standard textareas as IME composition targets,
-    // buffering typed words until the spacebar is pressed. Creating as type=text first dodges Chrome's
-    // autofill password scanner, then flipping to type=password post-open disables Gboard prediction.
     const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
                            ('ontouchstart' in window) ||
                            (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 
-    const origCreateElement = document.createElement;
-    if (isMobileDevice) {
-      document.createElement = function (tag, ...args) {
-        if (typeof tag === 'string' && tag.toLowerCase() === 'textarea') {
-          const el = origCreateElement.call(document, 'input', ...args);
-          el.type = 'text';
-          el.setAttribute('autocomplete', 'one-time-code');
-          el.setAttribute('data-1p-ignore', 'true');
-          el.setAttribute('data-lpignore', 'true');
-          el.setAttribute('data-bwignore', 'true');
-          return el;
-        }
-        return origCreateElement.call(document, tag, ...args);
-      };
-    }
-
     term.open(container);
-
-    if (isMobileDevice) {
-      document.createElement = origCreateElement;
-      // Flip to password AFTER Chrome's autofill scan completes (~DOMContentLoaded)
-      // to disable Gboard predictive text without triggering password save popup
-      if (term.textarea) {
-        setTimeout(() => { term.textarea.type = 'password'; }, 300);
-      }
-    }
 
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(() => {
@@ -310,6 +282,20 @@
           term.textarea.value = '';
         }
       });
+
+      if (isMobileDevice) {
+        // Gboard buffers characters as "composition" in standard textareas. 
+        // We intercept the input event BEFORE xterm does, send the raw character immediately, 
+        // and clear the textarea. Clearing the value forces Gboard to reset its composition buffer, 
+        // ensuring single-character streaming ("sathe sathe" typing) without type="password".
+        term.textarea.addEventListener('input', (e) => {
+          if (e.data && (e.inputType === 'insertText' || e.inputType === 'insertCompositionText')) {
+            sendInput(e.data);
+            e.stopPropagation();
+            term.textarea.value = '';
+          }
+        }, true);
+      }
     }
 
     // Intercept physical Escape key so browser does not swallow it
