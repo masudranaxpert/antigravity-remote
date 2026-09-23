@@ -240,32 +240,45 @@
     const now = new Date();
     syncTime.textContent = 'Synced ' + format12HourTime(now);
 
-    // Host PC Connection + Battery status inline in the PC pill
+    // Host PC Connection badge
     if (pcDot && pcStatusText) {
       pcDot.className = 'status-dot active';
+      pcStatusText.textContent = 'PC Online';
+    }
+
+    // Battery chip — separate element, never mutates the label
+    const batBadge = document.getElementById('bat-badge');
+    if (batBadge) {
       const bat = data.battery;
       if (bat && typeof bat.percent === 'number') {
         const pct = bat.percent;
         const st = bat.status; // Charging / Discharging / Full / Unknown
         const isCharging = st === 'Charging';
         const isFull = st === 'Full';
-        const isLow = pct <= 20 && !isCharging;
-        const isCritical = pct <= 10 && !isCharging;
+        const isLow  = pct <= 20 && !isCharging && !isFull;
+        const isCrit = pct <= 10 && !isCharging;
 
-        // Icon: bolt for charging, battery outline otherwise
+        // Bolt for charging, minimal battery body otherwise
         const icon = isCharging
-          ? `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true" class="bat-icon charging"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`
-          : `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="bat-icon"><rect x="2" y="7" width="18" height="11" rx="2"/><path d="M22 11v3"/></svg>`;
+          ? `<svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true" class="bat-bolt"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`
+          : `<svg width="12" height="10" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="bat-ico"><rect x="1" y="2" width="18" height="12" rx="2"/><path d="M20 6v4"/></svg>`;
 
-        const colorClass = isCritical ? 'bat-critical' : isLow ? 'bat-low' : isCharging ? 'bat-charging' : isFull ? 'bat-full' : '';
-        const label = isCharging ? `Charging ${pct}%` : isFull ? `Full (${pct}%)` : `${pct}%`;
+        // Clean label: charging → "⚡ 72%", full → "100%", else just "85%"
+        const label = isCharging ? `${pct}%` : isFull ? `${pct}%` : `${pct}%`;
 
-        pcStatusText.innerHTML = `PC Online&nbsp;${icon}<span class="bat-pct ${colorClass}">${label}</span>`;
-        pcStatusText.style.color = '';
-        pcStatusText.title = `Battery: ${pct}% — ${st}`;
+        const stateClass = isCrit ? 'bat-critical' : isLow ? 'bat-low' : isCharging ? 'bat-charging' : isFull ? 'bat-full' : '';
+        batBadge.className = `bat-badge${stateClass ? ' ' + stateClass : ''}`;
+        batBadge.innerHTML = `${icon}${label}`;
+        batBadge.removeAttribute('hidden');
+        batBadge.title = `Battery ${pct}% — ${st}`;
+
+        // Also tint the pill border when charging
+        const pill = document.getElementById('host-status-pill');
+        if (pill) {
+          pill.style.borderColor = isCharging ? 'rgba(52,211,153,0.35)' : isCrit ? 'rgba(248,113,113,0.35)' : isLow ? 'rgba(251,191,36,0.3)' : '';
+        }
       } else {
-        pcStatusText.textContent = 'PC Online';
-        pcStatusText.style.color = 'var(--text-primary)';
+        batBadge.setAttribute('hidden', '');
       }
     }
 
@@ -596,6 +609,10 @@
         pcDot.className = 'status-dot stopped';
         pcStatusText.textContent = 'PC Offline';
       }
+      const bb = document.getElementById('bat-badge');
+      if (bb) bb.setAttribute('hidden', '');
+      const pill = document.getElementById('host-status-pill');
+      if (pill) pill.style.borderColor = '';
       return;
     }
 

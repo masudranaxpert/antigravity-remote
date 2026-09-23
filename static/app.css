@@ -213,36 +213,69 @@ body {
   box-sizing: border-box;
 }
 
-/* Battery inline display inside PC Online pill */
-.bat-icon {
-  vertical-align: middle;
-  flex-shrink: 0;
-  opacity: 0.75;
-}
-
-.bat-icon.charging {
-  color: #34d399;
-  opacity: 1;
-  animation: bat-pulse 1.8s ease-in-out infinite;
-}
-
-@keyframes bat-pulse {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.45; }
-}
-
-.bat-pct {
+/* Battery chip inside PC Online pill */
+.bat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 99px;
+  font-size: 10px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  white-space: nowrap;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.15);
   color: var(--text-secondary);
+  transition: background 0.3s, border-color 0.3s, color 0.3s;
 }
 
-.bat-pct.bat-charging { color: #34d399; }
-.bat-pct.bat-full     { color: #6ee7b7; }
-.bat-pct.bat-low      { color: #fbbf24; }
-.bat-pct.bat-critical { color: #f87171; }
+/* Charging state — green tinted chip */
+.bat-badge.bat-charging {
+  background: rgba(52, 211, 153, 0.1);
+  border-color: rgba(52, 211, 153, 0.3);
+  color: #34d399;
+}
+
+/* Full state — very subtle green */
+.bat-badge.bat-full {
+  background: rgba(52, 211, 153, 0.07);
+  border-color: rgba(52, 211, 153, 0.18);
+  color: #6ee7b7;
+}
+
+/* Low battery — amber */
+.bat-badge.bat-low {
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.3);
+  color: #fbbf24;
+}
+
+/* Critical battery — red */
+.bat-badge.bat-critical {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.35);
+  color: #f87171;
+}
+
+/* Lightning bolt icon — only the bolt pulses when charging */
+.bat-badge .bat-bolt {
+  flex-shrink: 0;
+  animation: bolt-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes bolt-pulse {
+  0%, 100% { opacity: 1;    transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.85); }
+}
+
+/* Static battery icon */
+.bat-badge .bat-ico {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
 
 
 .app-pill {
