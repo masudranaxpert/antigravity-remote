@@ -251,28 +251,27 @@
     if (batBadge) {
       const bat = data.battery;
       if (bat && typeof bat.percent === 'number') {
-        const pct = bat.percent;
-        const st = bat.status; // Charging / Discharging / Full / Unknown
-        const isCharging = st === 'Charging';
-        const isFull = st === 'Full';
-        const isLow  = pct <= 20 && !isCharging && !isFull;
-        const isCrit = pct <= 10 && !isCharging;
+        const pct     = bat.percent;
+        const st      = bat.status;           // Charging / Discharging / Full / Unknown
+        const plugged = bat.plugged === true;  // AC adapter physically connected
 
-        // Bolt for charging, minimal battery body otherwise
+        // Linux often reports Full instead of Charging when at 100% — use plugged
+        const isCharging = st === 'Charging' || (plugged && st === 'Full');
+        const isLow      = pct <= 20 && !isCharging;
+        const isCrit     = pct <= 10 && !isCharging;
+
+        // Bolt when charger in, battery icon otherwise
         const icon = isCharging
           ? `<svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true" class="bat-bolt"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`
           : `<svg width="12" height="10" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="bat-ico"><rect x="1" y="2" width="18" height="12" rx="2"/><path d="M20 6v4"/></svg>`;
 
-        // Clean label: charging → "⚡ 72%", full → "100%", else just "85%"
-        const label = isCharging ? `${pct}%` : isFull ? `${pct}%` : `${pct}%`;
-
-        const stateClass = isCrit ? 'bat-critical' : isLow ? 'bat-low' : isCharging ? 'bat-charging' : isFull ? 'bat-full' : '';
+        const stateClass = isCrit ? 'bat-critical' : isLow ? 'bat-low' : isCharging ? 'bat-charging' : '';
         batBadge.className = `bat-badge${stateClass ? ' ' + stateClass : ''}`;
-        batBadge.innerHTML = `${icon}${label}`;
+        batBadge.innerHTML = `${icon}${pct}%`;
         batBadge.removeAttribute('hidden');
-        batBadge.title = `Battery ${pct}% — ${st}`;
+        batBadge.title = `Battery ${pct}% — ${isCharging ? 'Plugged in' : st}`;
 
-        // Also tint the pill border when charging
+        // Tint pill border to match state
         const pill = document.getElementById('host-status-pill');
         if (pill) {
           pill.style.borderColor = isCharging ? 'rgba(52,211,153,0.35)' : isCrit ? 'rgba(248,113,113,0.35)' : isLow ? 'rgba(251,191,36,0.3)' : '';

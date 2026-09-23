@@ -54,7 +54,7 @@ _POWER_SUPPLY = "/sys/class/power_supply"
 
 
 def get_battery_status():
-    """Read battery percentage and charging state from sysfs. Returns None if no battery."""
+    """Read battery percentage, charging state, and AC plug status from sysfs."""
     try:
         entries = os.listdir(_POWER_SUPPLY)
     except OSError:
@@ -66,7 +66,13 @@ def get_battery_status():
     try:
         pct = int(open(os.path.join(base, "capacity")).read().strip())
         status = open(os.path.join(base, "status")).read().strip()  # Charging/Discharging/Full/Unknown
-        return {"percent": pct, "status": status}
+        # AC adapter: status=Full while plugged in is common on Linux — check separately
+        plugged = any(
+            open(os.path.join(_POWER_SUPPLY, e, "online")).read().strip() == "1"
+            for e in entries if e.startswith("AC")
+            if os.path.exists(os.path.join(_POWER_SUPPLY, e, "online"))
+        )
+        return {"percent": pct, "status": status, "plugged": plugged}
     except Exception:
         return None
 
