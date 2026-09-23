@@ -587,16 +587,15 @@ class TerminalSession:
                 handled_ctrl = False
                 try:
                     ctrl = json.loads(payload.decode("utf-8", errors="replace"))
-                    if isinstance(ctrl, dict):
+                    if isinstance(ctrl, dict) and "type" in ctrl:
+                        handled_ctrl = True
                         msg_type = ctrl.get("type")
                         if msg_type == "ping":
                             self.conn.send(encode_ws_frame(b'{"type":"pong"}', opcode=1))
-                            handled_ctrl = True
                         elif msg_type == "resize":
                             r = int(ctrl.get("rows", 24))
                             c = int(ctrl.get("cols", 80))
                             self.pty_proc.resize(r, c)
-                            handled_ctrl = True
                 except Exception:
                     pass
                 if not handled_ctrl and self.pty_proc:

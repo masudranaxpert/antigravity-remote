@@ -84,16 +84,26 @@
       <div class="touch-bar-scroll">
         <button type="button" class="acc-btn special" tabindex="-1" data-key="escape" title="Escape">ESC</button>
         <button type="button" class="acc-btn toggle" tabindex="-1" id="ctrl-toggle-btn" title="Toggle Sticky Ctrl">CTRL</button>
+        <button type="button" class="acc-btn action" tabindex="-1" data-key="ctrl-c" title="Interrupt (Ctrl+C)">^C</button>
+        <button type="button" class="acc-btn action" tabindex="-1" data-key="ctrl-d" title="EOF / Exit (Ctrl+D)">^D</button>
+        <button type="button" class="acc-btn action" tabindex="-1" data-action="paste" title="Paste Clipboard">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+            <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+          </svg>
+        </button>
+        <button type="button" class="acc-btn action" tabindex="-1" data-action="copy" title="Copy Buffer">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+        </button>
         <button type="button" class="acc-btn toggle" tabindex="-1" id="alt-toggle-btn" title="Toggle Sticky Alt">ALT</button>
         <button type="button" class="acc-btn special" tabindex="-1" data-key="tab" title="Tab">TAB</button>
         <button type="button" class="acc-btn arrow" tabindex="-1" data-key="arrow-left" title="Move Left">&larr;</button>
         <button type="button" class="acc-btn arrow" tabindex="-1" data-key="arrow-down" title="Move Down">&darr;</button>
         <button type="button" class="acc-btn arrow" tabindex="-1" data-key="arrow-up" title="Move Up">&uarr;</button>
         <button type="button" class="acc-btn arrow" tabindex="-1" data-key="arrow-right" title="Move Right">&rarr;</button>
-        <button type="button" class="acc-btn action" tabindex="-1" data-key="ctrl-c" title="Interrupt (Ctrl+C)">^C</button>
-        <button type="button" class="acc-btn action" tabindex="-1" data-action="paste" title="Paste (📋)">📋</button>
-        <button type="button" class="acc-btn action" tabindex="-1" data-action="copy" title="Copy (📑)">📑</button>
-        <button type="button" class="acc-btn action" tabindex="-1" id="composer-acc-btn" title="Composer (✏️)">✏️</button>
         <button type="button" class="acc-btn symbol" tabindex="-1" data-raw="~" title="Home (~)">~</button>
         <button type="button" class="acc-btn symbol" tabindex="-1" data-raw="-" title="Dash (-)">-</button>
         <button type="button" class="acc-btn symbol" tabindex="-1" data-raw="/" title="Slash (/)">/</button>

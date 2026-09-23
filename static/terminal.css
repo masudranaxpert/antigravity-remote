@@ -357,6 +357,12 @@ html, body {
   transform: scale(0.92);
 }
 
+.acc-btn svg {
+  display: block;
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
 .acc-btn.special {
   color: var(--accent);
 }

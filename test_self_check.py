@@ -272,6 +272,10 @@ def run_checks():
             assert "xterm.js" in t_body_auth, "Expected xterm script tags in terminal template"
             assert 'data-action="paste"' in t_body_auth, "Expected paste button in terminal template"
             assert 'data-action="copy"' in t_body_auth, "Expected copy button in terminal template"
+            assert 'data-key="ctrl-c"' in t_body_auth, "Expected Ctrl+C button in terminal template"
+            assert 'data-key="ctrl-d"' in t_body_auth, "Expected Ctrl+D button in terminal template"
+            assert 'id="composer-acc-btn"' not in t_body_auth, "Composer button should be removed from accessory bar"
+            assert '<svg width="15" height="15"' in t_body_auth, "Expected modern SVG icons in accessory bar"
             assert 'data-key="backspace"' in t_body_auth, "Expected backspace button in terminal template"
             assert 'data-raw="."' in t_body_auth, "Expected dot button in terminal template"
             assert 'data-raw=".."' in t_body_auth, "Expected double dot button in terminal template"
@@ -375,6 +379,12 @@ def run_checks():
         time.sleep(0.1)
         pong_in = ws_sock.recv(1024)
         assert b'"type":"pong"' in pong_in or b"pong" in pong_in, f"Expected pong response, got {pong_in}"
+
+        # Send custom control JSON and verify it is absorbed (never leaked into PTY stdin)
+        ctrl_bytes = b'{"type":"session","id":"leaked_check"}'
+        masked_ctrl = bytes(b ^ mask_p[i % 4] for i, b in enumerate(ctrl_bytes))
+        ws_sock.sendall(bytearray([0x81, 0x80 | len(ctrl_bytes)]) + mask_p + masked_ctrl)
+        time.sleep(0.1)
 
         # Now disconnect socket abruptly (simulates mobile background / network drop)
         ws_sock.close()

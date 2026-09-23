@@ -30,6 +30,10 @@
 
   try {
     currentSessionId = sessionStorage.getItem(SESSION_KEY) || '';
+    if (!currentSessionId) {
+      currentSessionId = 'sess_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+      sessionStorage.setItem(SESSION_KEY, currentSessionId);
+    }
   } catch (_) {}
 
   // Lightweight haptic vibration feedback for modifier key toggles
@@ -249,6 +253,13 @@
       term.textarea.removeAttribute('inputmode');
       term.textarea.setAttribute('enterkeyhint', 'go');
 
+      let lastKeyDownCode = 0;
+      const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || ('ontouchstart' in window);
+
+      term.textarea.addEventListener('keydown', (e) => {
+        lastKeyDownCode = e.keyCode;
+      });
+
       term.textarea.addEventListener('compositionstart', () => {
         isComposing = true;
       });
@@ -260,7 +271,7 @@
         }, 0);
       });
 
-      // Intercept beforeinput to handle Backspace, Enter, and Gboard word replacements cleanly
+      // Intercept beforeinput to handle Backspace, Enter, typing & word replacements cleanly
       term.textarea.addEventListener('beforeinput', (e) => {
         if (e.inputType === 'deleteContentBackward') {
           sendInput('\x7f');
@@ -284,6 +295,27 @@
           sendInput('\x7f'.repeat(deleteCount) + newText);
           e.preventDefault();
           term.textarea.value = '';
+        } else if (e.inputType === 'insertText' || e.inputType === 'insertCompositionText') {
+          // Android Gboard / soft keyboard uses keyCode 229 / composition which stalls xterm onData
+          if (e.data && (lastKeyDownCode === 229 || e.isComposing || isMobileDevice)) {
+            let text = sanitizeTerminalInput(e.data);
+            if (isCtrlActive && text.length === 1) {
+              const code = text.charCodeAt(0);
+              let ctrlChar = text;
+              if (code >= 64 && code <= 95) ctrlChar = String.fromCharCode(code - 64);
+              else if (code >= 97 && code <= 122) ctrlChar = String.fromCharCode(code - 96);
+              setCtrlActive(false);
+              sendInput(ctrlChar);
+            } else if (isAltActive && text.length === 1) {
+              setAltActive(false);
+              sendInput('\x1b' + text);
+            } else {
+              sendInput(text);
+            }
+            e.preventDefault();
+            term.textarea.value = '';
+            lastKeyDownCode = 0;
+          }
         }
       });
     }
@@ -470,39 +502,62 @@
       startHeartbeat();
     };
 
+    function handleControlMessage(data) {
+      try {
+        const msg = typeof data === 'string' ? JSON.parse(data) : data;
+        if (!msg || typeof msg !== 'object') return false;
+
+        if (msg.type === 'pong') {
+          handlePong();
+          return true;
+        }
+
+        if (msg.type === 'session') {
+          currentSessionId = msg.id;
+          try {
+            sessionStorage.setItem(SESSION_KEY, msg.id);
+          } catch (_) {}
+          if (msg.reconnected && term) {
+            term.reset();
+            // Nudge resize to trigger SIGWINCH in TUI apps
+            setTimeout(() => {
+              sendResize(term.cols - 1, term.rows);
+              setTimeout(() => sendResize(term.cols, term.rows), 60);
+            }, 80);
+          }
+          return true;
+        }
+
+        return Boolean(msg.type);
+      } catch (_) {
+        return false;
+      }
+    }
+
     ws.onmessage = (event) => {
+      // 1. ArrayBuffer payload (PTY binary output or tunnel-converted control frame)
       if (event.data instanceof ArrayBuffer) {
-        // Stream PTY binary output chunk straight into xterm streaming decoder
+        const bytes = new Uint8Array(event.data);
+        // Intercept control JSON frame if WebKit or proxy delivered it as binary
+        if (bytes.length > 0 && bytes.length < 1024 && bytes[0] === 0x7B /* '{' */) {
+          try {
+            const text = new TextDecoder('utf-8').decode(bytes);
+            if (handleControlMessage(text)) {
+              return;
+            }
+          } catch (_) {}
+        }
+        // Stream raw PTY binary output into xterm's streaming UTF-8 decoder
         if (term) {
-          term.write(new Uint8Array(event.data));
+          term.write(bytes);
         }
         return;
       }
 
+      // 2. Text payload (Control JSON commands)
       if (typeof event.data === 'string') {
-        // Text control frames (JSON)
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === 'pong') {
-            handlePong();
-            return;
-          }
-          if (msg.type === 'session') {
-            currentSessionId = msg.id;
-            try {
-              sessionStorage.setItem(SESSION_KEY, msg.id);
-            } catch (_) {}
-            if (msg.reconnected && term) {
-              term.reset();
-              // Nudge resize to trigger SIGWINCH in TUI apps
-              setTimeout(() => {
-                sendResize(term.cols - 1, term.rows);
-                setTimeout(() => sendResize(term.cols, term.rows), 60);
-              }, 80);
-            }
-            return;
-          }
-        } catch (_) {}
+        handleControlMessage(event.data);
+        return;
       }
     };
 
@@ -835,6 +890,9 @@
             break;
           case 'ctrl-c':
             sendInput('\x03');
+            break;
+          case 'ctrl-d':
+            sendInput('\x04');
             break;
           case 'arrow-up':
             sendInput(getArrowKey('A'));
