@@ -897,7 +897,7 @@
         else sendInput(manual);
       }
     }
-    if (term) term.focus();
+    if (term && document.activeElement === term.textarea) term.focus();
   }
 
   function openSelectMode() {
@@ -933,9 +933,6 @@
   function closeSelectMode() {
     const overlay = document.getElementById('select-overlay');
     if (overlay) overlay.hidden = true;
-    if (term && term.textarea) {
-      term.textarea.focus({ preventScroll: true });
-    }
   }
 
   async function copySelectModeContent(allOnly = false) {
@@ -955,7 +952,7 @@
       const selection = term.getSelection();
       if (selection) {
         await copyTextToClipboard(selection, `Copied ${selection.length} chars`);
-        if (term) term.focus();
+        if (term && document.activeElement === term.textarea) term.focus();
         return;
       }
     }
@@ -981,7 +978,11 @@
     if (shouldOpen && input) {
       setTimeout(() => input.focus(), 80);
     } else if (!shouldOpen && term && term.textarea) {
-      term.textarea.focus({ preventScroll: true });
+      if (document.activeElement === input) {
+        term.textarea.focus({ preventScroll: true });
+      } else {
+        input.blur();
+      }
     }
   }
 
