@@ -112,3 +112,40 @@
 6. **Tactile Haptic Feedback & Safe-Area Ergonomics**
    - [x] সমস্ত এক্সেসরি বাটন এবং কুইক কমান্ড চিপে হালকা ভাইব্রেশন (`navigator.vibrate(12)`).
    - [x] আইফোন ও জেসচার বার সাপোর্টের জন্য `viewport-fit=cover` ও CSS `env(safe-area-inset-...)` নিশ্চিত করা।
+
+---
+
+## Task 4: Complete Web Terminal Protocol, Session Persistence, IME & Security Overhaul (31-Point Audit)
+
+### 1. Critical Architecture & Reliability (Audit 1–7)
+- [x] **RFC 6455 Binary Frame Streaming (Opcode 2):** PTY আউটপুট সরাসরি বাইনারি ফ্রেমে স্ট্রিম করা হয়। ফলে বাংলা, ইমোজি, বা TUI বক্স-ড্রয়িং ক্যারেক্টার ৪KB রিড বাউন্ডারিতে কাটলেও ব্রাউজারে RFC 6455 কোড 1007 ডিসকানেক্ট হয় না।
+- [x] **Background Shell & PTY Persistence (Session Manager):** পিওর পাইথন স্ট্যান্ডার্ড লাইব্রেরিতে `PTYSessionManager` ও ১২৮KB রিং বাফার যোগ করা হয়েছে। মোবাইল নেটওয়ার্ক ড্রপ, ট্যাব সুইচ, ব্যাকগ্রাউন্ড বা স্ক্রিন লক হলেও হোস্টের শেল প্রসেস ব্যাকগ্রাউন্ডে নিরাপদে চলতে থাকে। রিকানেক্টে আগের সম্পূর্ণ স্ক্রিন ব্যাকলগ রিপ্লে হয়।
+- [x] **Inherited Python Signal Reset:** চাইল্ড শেল প্রসেস স্পন করার পূর্বে পাইথনের ডিফল্ট `SIGPIPE = SIG_IGN` পরিবর্তন করে `SIG_DFL` এ রিস্টোর এবং `pthread_sigmask` আনমাস্ক করা হয়েছে। ফলে পাইপ কমান্ড (`cat | head`) ভাঙবে না।
+- [x] **Slave PTY `termios.IUTF8` Flag:** স্লেভ টার্মিনাল লাইন ডিসিপ্লিনে `termios.IUTF8` সেট করা হয়েছে, যা ক্যানোনিকাল মোডে মাল্টিবাইট ক্যারেক্টারের সঠিক ব্যাকস্পেস হ্যান্ডলিং নিশ্চিত করে।
+- [x] **Separation of Control vs Terminal Data:** টেক্সট ফ্রেম (Opcode 1) শুধুমাত্র JSON কন্ট্রোল কমান্ডের (যেমন `resize`, `ping`) জন্য ব্যবহৃত হয় এবং বাইনারি ফ্রেম (Opcode 2) র' টার্মিনাল ডেটার জন্য ব্যবহৃত হয়। ফলে শেলের আউটপুটে বা পেস্ট করা টেক্সটে `{"type":"pong"}` বা `{"type":"resize"}` থাকলেও কোনো কমান্ড ইনজেকশন বা ড্রপ হবে না।
+- [x] **WebSocket Continuation Frame (Opcode 0) Reassembly:** ফ্র্যাগমেন্টেড ওয়েবসকেট ফ্রেম পূর্ণাঙ্গভাবে রিসিভ করে জোড়া লাগিয়ে PTY-তে পাঠানো হয়।
+- [x] **Process Group Teardown:** সেশন সম্পূর্ণ ক্লোজ করার সময় `os.killpg(child_pid, ...)` দিয়ে অরফান ব্যাকগ্রাউন্ড প্রসেস ক্লিনআপ নিশ্চিত করা হয়েছে।
+
+### 2. Mobile IME & Input Ergonomics (Audit 8–15)
+- [x] **Desktop Mouse SGR Support:** ডেস্কটপ মাউস ইভেন্ট (`\x1b[<...M`) সার্ভার থেকে গ্লোবালি ফিল্টার না করে অক্ষুণ্ণ রাখা হয়েছে; টাচ ডিভাইসে সিন্থেটিক মাউস ফিল্টারিং করা হয় শুধুমাত্র সাম্প্রতিক টাচের সময়ের ভিত্তিতে (`Date.now() - lastTouchTime < 650`)। ফলে ডেস্কটপে `vim`, `htop`, `tmux` মাউস ইন্টারঅ্যাকশন ১০০% কার্যকর।
+- [x] **Gboard Autocorrect & IME Hardening:** `beforeinput` ইভেন্টে `insertReplacementText` এবং কম্পোজিশন ট্র্যাকিং (`isComposing`) যুক্ত করে মোবাইলে `cd .` দিলে `cd cd.` বা `ce..` হওয়ার ডুপ্লিকেশন সমস্যা গোড়া থেকে সমাধান করা হয়েছে।
+- [x] **Smart Punctuation Sanitization:** মোবাইল কীবোর্ডের বাঁকা কোট (`“`, `”`, `‘`, `’`) ও এম-ড্যাশ (`—`) স্বয়ংক্রিয়ভাবে স্ট্রেট কোট (`"`, `'`) ও হাইফেন (`--`) এ রূপান্তর।
+- [x] **Bracketed Paste Mode:** ক্লিপবোর্ড পেস্ট বা কম্পোজার ড্রয়ার থেকে ইনপুট দেওয়ার সময় `term.paste(text)` ব্যবহার করা হয়েছে, যাতে শেলে স্বয়ংক্রিয়ভাবে এক্সিকিউট না হয়ে প্রম্পটে প্রটেক্টেড থাকে।
+- [x] **DECCKM Application Cursor Mode Support:** অ্যারো কী প্রেরণের সময় টার্মিনালের `applicationCursorKeysMode` যাচাই করে `\x1bOA` বনাম `\x1b[A` যথাযথভাবে পাঠানো হয়।
+- [x] **Sticky Modifiers Visual Feedback & Auto-Release:** Ctrl ও Alt মডিফায়ার অ্যাক্টিভেশনের পর ভিজ্যুয়াল স্টেট এবং একটি ক্যারেক্টার ব্যবহারের পর অটো-রিলিজ।
+- [x] **Font Loading Synchronization:** ফন্ট সম্পূর্ণরূপে লোড হওয়ার পর (`document.fonts.ready`) টার্মিনালের ডাইমেনশন ফিট করা হয়।
+
+### 3. Viewport & Connection Polish (Audit 16–27)
+- [x] **Soft Keyboard Focus Preservation:** এক্সেসরি বারের বাটনগুলোতে `pointerdown` এ `e.preventDefault()` প্রয়োগ করে ভার্চুয়াল কীবোর্ড ব্লার হওয়া বন্ধ করা হয়েছে।
+- [x] **iOS Visual Viewport Anchoring:** আইওএস সাফারি ও অ্যান্ড্রয়েড ক্রোম ভিউপোর্টে কীবোর্ডের উচ্চতা ডাইনামিকালি `window.visualViewport.height` এ অ্যাঙ্কর করা।
+- [x] **Resize Debouncing:** ২০০ms ডিবাইউন্স দিয়ে উইন্ডো বা কীবোর্ড পরিবর্তনের সময় অতিরিক্ত `SIGWINCH` স্প্যাম বন্ধ করা হয়েছে।
+- [x] **Initial Size Sync:** ওয়েবসকেট ওপেন হওয়ার পরপরই বর্তমান কলাম ও র' ব্যাকএন্ডে সিঙ্ক করা।
+- [x] **Half-Open Connection Detection:** ১৫ সেকেন্ড অন্তর ক্লায়েন্ট পিং এবং ৮ সেকেন্ড পং টাইমআউট দিয়ে ডেড সকেট সনাক্তকরণ ও অটো-রিকানেক্ট।
+- [x] **Safe Clean Reconnect:** রিকানেক্ট কাউন্টার ডাবল-কাউন্টিং দূর করা এবং `sessionStorage`-এ `session_id` সংরক্ষণ।
+- [x] **Quick Chips Prompt Clearance:** কুইক কমান্ড বাটনে `\x15` (Ctrl+U) প্রিফিক্স যুক্ত করা হয়েছে যাতে প্রম্পটের আগের অসম্পূর্ণ টেক্সট মুছে ফ্রেশ কমান্ড রান হয়।
+
+### 4. Security Hardening (Audit 28–31)
+- [x] **Cross-Site WebSocket Hijacking (CSWSH) Prevention:** ব্যাকএন্ডে `Origin` হেডার কঠোরভাবে যাচাই করা হয় (`Host`, `localhost`, `127.0.0.1`, এবং `.masud-rana.me`), অবৈধ অরিজিন থেকে সংযোগ HTTP 403 Forbidden দ্বারা প্রত্যাখ্যাত।
+- [x] **Killswitch Enforcement:** টার্মিনাল ডিকনফিগার বা ডিসেবল হলে লাইভ সমস্ত PTY সেশন সাথে সাথে কিল করা হয়।
+- [x] **24-Hour Connection Duration Ceiling:** যেকোনো সেশনের সর্বোচ্চ আয়ু ২৪ ঘণ্টা পর্যন্ত সীমাবদ্ধ।
+- [x] **Strict HTTP-Only Device Binding:** কুকি হাইজ্যাকিং প্রতিরোধে ডিভাইস ফিঙ্গারপ্রিন্ট বাইন্ডিং ও কুয়েরি টোকেন লিকেজ প্রটেকশন।

@@ -34,7 +34,7 @@ from app.switcher import (
     set_sleep_inhibit,
     toggle_host_audio_mute,
 )
-from app.terminal import TerminalSession, compute_accept_key
+from app.terminal import TerminalSession, close_all_terminal_sessions, compute_accept_key
 from app.totp import (
     compute_totp,
     generate_totp_secret,
@@ -464,8 +464,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "unauthorized"}, 401)
 
             if not st.get("terminal_enabled", True):
+                close_all_terminal_sessions()
                 record_client_access(self.headers, self.client_address, path, "WS", 403, True, "terminal_disabled")
                 return self.send_json({"error": "terminal_disabled", "message": "Terminal access is disabled."}, 403)
+
+            # Issue 28: Origin validation to prevent Cross-Site WebSocket Hijacking
+            origin = self.headers.get("Origin", "").strip()
+            if origin:
+                origin_host = urlparse(origin).netloc.split(":")[0].lower()
+                host_header = self.headers.get("Host", "").split(":")[0].lower()
+                allowed_hosts = {host_header, "localhost", "127.0.0.1"}
+                if origin_host not in allowed_hosts and not origin_host.endswith(".masud-rana.me"):
+                    record_client_access(self.headers, self.client_address, path, "WS", 403, False, "origin_rejected")
+                    return self.send_json({"error": "forbidden_origin"}, 403)
 
             record_client_access(self.headers, self.client_address, path, "WS", 101, True, "websocket_upgrade")
             ws_key = self.headers.get("Sec-WebSocket-Key", "").strip()
@@ -493,7 +504,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except Exception:
                 rows, cols = 24, 80
 
-            session = TerminalSession(self.connection, rows=rows, cols=cols)
+            session_id = query.get("session_id", [None])[0]
+            session = TerminalSession(self.connection, rows=rows, cols=cols, session_id=session_id)
             self.close_connection = True
             session.start()
             return
@@ -705,6 +717,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             new_val = not st_cur.get("terminal_enabled", True)
             st_cur["terminal_enabled"] = new_val
             save_state(st_cur)
+            if not new_val:
+                close_all_terminal_sessions()
             record_client_access(self.headers, self.client_address, path, "POST", 200, True, f"toggle_terminal_{new_val}")
             return self.send_json({
                 "success": True,

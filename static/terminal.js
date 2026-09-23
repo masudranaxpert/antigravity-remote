@@ -1,7 +1,7 @@
 /**
  * Antigravity Remote - Interactive Mobile Terminal Controller
- * Manages xterm.js instance, RFC 6455 WebSocket bridge, keep-alive heartbeat,
- * auto-reconnect, and mobile touch accessories.
+ * Manages xterm.js instance, RFC 6455 Binary WebSocket bridge, persistent session
+ * reattachment, keep-alive heartbeat, and mobile touch accessories.
  */
 (function () {
   'use strict';
@@ -11,13 +11,24 @@
   let ws = null;
   let isCtrlActive = false;
   let isAltActive = false;
+  let isComposing = false;
   let currentFontSize = 13;
   let reconnectTimer = null;
   let toastTimer = null;
   let heartbeatTimer = null;
+  let pongTimeoutTimer = null;
   let reconnectAttempts = 0;
   let isManuallyClosed = false;
+  let isReconnecting = false;
+  let lastTouchTime = 0;
+  let lastSentCols = -1;
+  let lastSentRows = -1;
+  let currentSessionId = '';
   const MAX_RECONNECT_ATTEMPTS = 15;
+
+  try {
+    currentSessionId = sessionStorage.getItem('remote_term_session_id') || '';
+  } catch (_) {}
 
   // Lightweight haptic vibration feedback for mobile touches
   function triggerHaptic(duration = 12) {
@@ -104,13 +115,22 @@
     }
   }
 
+  // Sends raw keystrokes / terminal data as RFC 6455 Binary Frame (opcode 2)
   function sendInput(data) {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(data);
+      if (typeof data === 'string') {
+        ws.send(new TextEncoder().encode(data));
+      } else {
+        ws.send(data);
+      }
     }
   }
 
+  // Sends terminal control commands (resize, ping) as RFC 6455 Text Frame (opcode 1)
   function sendResize(cols, rows) {
+    if (cols === lastSentCols && rows === lastSentRows) return;
+    lastSentCols = cols;
+    lastSentRows = rows;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'resize', cols, rows }));
     }
@@ -120,9 +140,18 @@
     stopHeartbeat();
     heartbeatTimer = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN) {
+        // Ping control packet
         ws.send(JSON.stringify({ type: 'ping' }));
+        clearTimeout(pongTimeoutTimer);
+        // Half-open connection detection: if pong does not arrive within 8s, trigger reconnect
+        pongTimeoutTimer = setTimeout(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            showToast('Heartbeat timeout, reconnecting...', 'info');
+            ws.close();
+          }
+        }, 8000);
       }
-    }, 15000); // 15s keep-alive interval prevents Cloudflare tunnel / mobile idle timeouts
+    }, 15000);
   }
 
   function stopHeartbeat() {
@@ -130,25 +159,38 @@
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;
     }
+    if (pongTimeoutTimer) {
+      clearTimeout(pongTimeoutTimer);
+      pongTimeoutTimer = null;
+    }
+  }
+
+  function handlePong() {
+    if (pongTimeoutTimer) {
+      clearTimeout(pongTimeoutTimer);
+      pongTimeoutTimer = null;
+    }
   }
 
   function scheduleReconnect() {
-    if (isManuallyClosed) return;
+    if (isManuallyClosed || isReconnecting) return;
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       setStatus(false, 'disconnected (max retries)');
       showToast('Terminal connection dropped. Tap refresh button to reconnect.', 'err');
       return;
     }
+    isReconnecting = true;
     reconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(1.4, reconnectAttempts), 6000);
+    const delay = Math.min(1000 * Math.pow(1.3, reconnectAttempts), 5000);
     setStatus(false, `reconnecting (${reconnectAttempts})...`);
     clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(() => {
+      isReconnecting = false;
       connectWebSocket();
     }, delay);
   }
 
-  // Sanitizes mobile smart punctuation (curly quotes, em-dashes, non-breaking spaces) to raw ASCII
+  // Sanitizes mobile smart punctuation (curly quotes, em-dashes, non-breaking spaces) on soft keyboard
   function sanitizeTerminalInput(data) {
     if (!data) return data;
     return data
@@ -158,6 +200,20 @@
       .replace(/\u2013/g, '-')         // En-dash – -> -
       .replace(/\u2026/g, '...')       // Ellipsis … -> ...
       .replace(/\u00a0/g, ' ');        // Non-breaking space \u00a0 -> space
+  }
+
+  function getArrowKey(directionChar) {
+    const isAppMode = Boolean(term && term.modes && term.modes.applicationCursorKeysMode);
+    let prefix = isAppMode ? '\x1bO' : '\x1b[';
+    if (isCtrlActive) {
+      setCtrlActive(false);
+      return `\x1b[1;5${directionChar}`;
+    }
+    if (isAltActive) {
+      setAltActive(false);
+      return `\x1b[1;3${directionChar}`;
+    }
+    return prefix + directionChar;
   }
 
   function initTerminal() {
@@ -184,7 +240,12 @@
 
     term.open(container);
 
-    // Hardening the hidden mobile textarea against Gboard/iOS predictive composition and autocorrect
+    // Initial measurement
+    if (fitAddon) {
+      fitAddon.fit();
+    }
+
+    // Hardening mobile helper textarea against unwanted autocorrect and tracking composition
     if (term.textarea) {
       term.textarea.setAttribute('autocapitalize', 'none');
       term.textarea.setAttribute('autocorrect', 'off');
@@ -193,7 +254,18 @@
       term.textarea.removeAttribute('inputmode');
       term.textarea.setAttribute('enterkeyhint', 'go');
 
-      // Intercept mobile Backspace and Enter beforeinput events to guarantee shell delivery
+      term.textarea.addEventListener('compositionstart', () => {
+        isComposing = true;
+      });
+
+      term.textarea.addEventListener('compositionend', () => {
+        isComposing = false;
+        setTimeout(() => {
+          if (term.textarea && !isComposing) term.textarea.value = '';
+        }, 0);
+      });
+
+      // Intercept beforeinput to handle Backspace, Enter, and Gboard word replacements cleanly
       term.textarea.addEventListener('beforeinput', (e) => {
         if (e.inputType === 'deleteContentBackward') {
           sendInput('\x7f');
@@ -203,24 +275,18 @@
           sendInput('\r');
           e.preventDefault();
           term.textarea.value = '';
+        } else if (e.inputType === 'insertReplacementText') {
+          // Autocorrect or Gboard suggestion replacement
+          const newText = (e.dataTransfer ? e.dataTransfer.getData('text/plain') : e.data) || '';
+          if (newText) {
+            const prevLen = term.textarea.value.length;
+            const backspaces = '\x7f'.repeat(Math.max(1, prevLen));
+            sendInput(backspaces + newText);
+            e.preventDefault();
+            term.textarea.value = '';
+          }
         }
       });
-
-      // Clear composition buffer on compositionend to eliminate stale substring diffs
-      term.textarea.addEventListener('compositionend', () => {
-        setTimeout(() => {
-          if (term.textarea) term.textarea.value = '';
-        }, 0);
-      });
-    }
-
-    // Disable SGR and DEC mouse reporting modes to eliminate garbage clicks (e.g. 35;9;3M)
-    term.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l');
-
-    if (fitAddon) {
-      setTimeout(() => {
-        fitAddon.fit();
-      }, 50);
     }
 
     // Intercept physical Escape key so browser does not swallow it
@@ -236,15 +302,20 @@
 
     // Process keystrokes typed by user
     term.onData((data) => {
-      // Filter out SGR/X10 mouse tracking sequences sent on mobile screen taps (e.g. \x1b[<35;9;3M)
+      // Filter out synthetic mouse tracking events triggered by mobile screen taps
       if (data.startsWith('\x1b[<') || data.startsWith('\x1b[M')) {
-        return;
+        if (Date.now() - lastTouchTime < 650) {
+          return;
+        }
+        // Desktop mouse event: allow through to TUI app!
       }
 
-      data = sanitizeTerminalInput(data);
+      // Sanitize single interactive character typing
+      if (data.length === 1) {
+        data = sanitizeTerminalInput(data);
+      }
 
       if (isCtrlActive && data.length === 1) {
-        // Apply sticky Ctrl modifier to single character
         const code = data.charCodeAt(0);
         let ctrlChar = data;
         if (code >= 64 && code <= 95) {
@@ -254,21 +325,19 @@
         }
         setCtrlActive(false);
         sendInput(ctrlChar);
-        if (term.textarea) term.textarea.value = '';
+        if (term.textarea && !isComposing) term.textarea.value = '';
         return;
       }
 
       if (isAltActive && data.length >= 1) {
-        // Apply sticky Alt modifier (prefix with ESC \x1b)
         setAltActive(false);
         sendInput('\x1b' + data);
-        if (term.textarea) term.textarea.value = '';
+        if (term.textarea && !isComposing) term.textarea.value = '';
         return;
       }
 
       sendInput(data);
-      // Clean hidden textarea buffer so mobile keyboard doesn't accumulate state or misdiff punctuation
-      if (term.textarea) {
+      if (term.textarea && !isComposing) {
         term.textarea.value = '';
       }
     });
@@ -280,6 +349,7 @@
     let longPressTimer = null;
 
     container.addEventListener('touchstart', (e) => {
+      lastTouchTime = Date.now();
       if (e.touches.length !== 1) return;
       const t = e.touches[0];
       touchStartX = t.clientX;
@@ -306,7 +376,6 @@
     container.addEventListener('touchend', (e) => {
       clearTimeout(longPressTimer);
       longPressTimer = null;
-      // If tap was short (< 250ms) and within threshold, focus terminal
       if (Date.now() - touchStartTime < 250 && e.changedTouches.length === 1) {
         const end = e.changedTouches[0];
         if (Math.hypot(end.clientX - touchStartX, end.clientY - touchStartY) <= 8) {
@@ -339,9 +408,9 @@
         const dy = altScrollLastY - y;
         if (Math.abs(dy) >= 18) {
           if (dy > 0) {
-            sendInput('\x1b[B'); // Down arrow
+            sendInput(getArrowKey('B')); // Down
           } else {
-            sendInput('\x1b[A'); // Up arrow
+            sendInput(getArrowKey('A')); // Up
           }
           altScrollLastY = y;
         }
@@ -371,6 +440,7 @@
 
   function connectWebSocket() {
     clearTimeout(reconnectTimer);
+    isReconnecting = false;
     setStatus(false, reconnectAttempts > 0 ? `reconnecting...` : 'connecting...');
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -378,7 +448,11 @@
     const rows = term ? term.rows : 24;
     const urlParams = new URLSearchParams(window.location.search);
     const tokenParam = urlParams.get('token');
+
     let wsUrl = `${protocol}//${location.host}/api/terminal/ws?cols=${cols}&rows=${rows}`;
+    if (currentSessionId) {
+      wsUrl += `&session_id=${encodeURIComponent(currentSessionId)}`;
+    }
     if (tokenParam) {
       wsUrl += `&token=${encodeURIComponent(tokenParam)}`;
     }
@@ -392,6 +466,7 @@
         try { ws.close(); } catch (_) {}
       }
       ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer'; // RFC 6455 Binary Frame handling
     } catch (err) {
       setStatus(false, 'connection error');
       showToast('WebSocket error: ' + err.message, 'err');
@@ -400,11 +475,13 @@
     }
 
     ws.onopen = () => {
+      const wasReconnecting = reconnectAttempts > 0;
       reconnectAttempts = 0;
       isManuallyClosed = false;
+      isReconnecting = false;
       startHeartbeat();
       setStatus(true, 'bash • remote');
-      showToast(reconnectAttempts > 0 ? 'Terminal reconnected' : 'Connected to host terminal', 'ok');
+      showToast(wasReconnecting ? 'Terminal reconnected' : 'Connected to host terminal', 'ok');
       if (fitAddon && term) {
         fitAddon.fit();
         sendResize(term.cols, term.rows);
@@ -413,12 +490,30 @@
     };
 
     ws.onmessage = (event) => {
-      if (term) {
-        // Discard ping/pong control JSON from output
-        if (typeof event.data === 'string' && event.data.includes('"type":"pong"')) {
-          return;
+      if (event.data instanceof ArrayBuffer) {
+        // Binary PTY terminal output: feeds xterm streaming UTF-8 decoder directly
+        if (term) {
+          term.write(new Uint8Array(event.data));
         }
-        term.write(event.data);
+        return;
+      }
+
+      if (typeof event.data === 'string') {
+        // Text control frames (JSON)
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'pong') {
+            handlePong();
+            return;
+          }
+          if (msg.type === 'session') {
+            currentSessionId = msg.id;
+            try {
+              sessionStorage.setItem('remote_term_session_id', msg.id);
+            } catch (_) {}
+            return;
+          }
+        } catch (_) {}
       }
     };
 
@@ -468,11 +563,15 @@
     let activeEl = null;
 
     container.addEventListener('pointerdown', (e) => {
-      // Always reset drag state on any new touch, even outside a button
+      // Prevent losing focus on term.textarea when tapping accessory buttons
+      const el = e.target.closest(selector);
+      if (el) {
+        e.preventDefault();
+      }
       isDrag = false;
       startX = e.clientX;
       startY = e.clientY;
-      activeEl = e.target.closest(selector);
+      activeEl = el;
     });
 
     container.addEventListener('pointermove', (e) => {
@@ -484,7 +583,6 @@
     container.addEventListener('pointerup', (e) => {
       if (isDrag || !activeEl) return;
       const el = e.target.closest(selector);
-      // Require pointerup on same element as pointerdown to avoid swipe-through
       if (!el || el !== activeEl) return;
       e.preventDefault();
       triggerHaptic(10);
@@ -497,7 +595,6 @@
       activeEl = null;
     });
 
-    // Suppress synthetic click to prevent duplicate trigger
     container.addEventListener('click', (e) => {
       const el = e.target.closest(selector);
       if (el) e.preventDefault();
@@ -510,18 +607,28 @@
       if (navigator.clipboard && navigator.clipboard.readText) {
         const text = await navigator.clipboard.readText();
         if (text) {
-          sendInput(sanitizeTerminalInput(text));
+          if (term) {
+            term.paste(text); // Respects bracketed paste mode!
+          } else {
+            sendInput(text);
+          }
           showToast('Pasted from clipboard', 'ok');
         } else {
           showToast('Clipboard is empty', 'info');
         }
       } else {
         const manual = prompt('Paste text to send to terminal:');
-        if (manual) sendInput(sanitizeTerminalInput(manual));
+        if (manual) {
+          if (term) term.paste(manual);
+          else sendInput(manual);
+        }
       }
     } catch (_) {
       const manual = prompt('Paste text to send to terminal:');
-      if (manual) sendInput(sanitizeTerminalInput(manual));
+      if (manual) {
+        if (term) term.paste(manual);
+        else sendInput(manual);
+      }
     }
     if (term) term.focus();
   }
@@ -675,7 +782,11 @@
     const rawVal = input.value;
     if (!rawVal) return;
     triggerHaptic(15);
-    sendInput(sanitizeTerminalInput(rawVal) + '\r');
+    if (term) {
+      term.paste(rawVal + '\r');
+    } else {
+      sendInput(rawVal + '\r');
+    }
     input.value = '';
     toggleComposer(false);
   }
@@ -738,16 +849,16 @@
           sendInput('\x0c');
           break;
         case 'arrow-up':
-          sendInput('\x1b[A');
+          sendInput(getArrowKey('A'));
           break;
         case 'arrow-down':
-          sendInput('\x1b[B');
+          sendInput(getArrowKey('B'));
           break;
         case 'arrow-left':
-          sendInput('\x1b[D');
+          sendInput(getArrowKey('D'));
           break;
         case 'arrow-right':
-          sendInput('\x1b[C');
+          sendInput(getArrowKey('C'));
           break;
         default:
           break;
@@ -765,7 +876,8 @@
       const cmd = chip.getAttribute('data-cmd');
       if (cmd) {
         triggerHaptic(12);
-        sendInput(cmd);
+        // Prefix with Ctrl+U (\x15) to clear any half-typed text on the prompt first
+        sendInput('\x15' + cmd);
         if (term) term.focus();
       }
     });
@@ -876,22 +988,27 @@
       });
     }
 
-    // Debounced window and visualViewport resize listener (prevents SIGWINCH spam during keyboard animation)
+    // Debounced window and visualViewport resize listener with iOS visualViewport height anchoring
     let resizeDebounceTimer = null;
+    const scaffold = document.querySelector('.terminal-scaffold');
+
     const handleResize = () => {
+      if (window.visualViewport && scaffold) {
+        scaffold.style.height = `${window.visualViewport.height}px`;
+      }
       clearTimeout(resizeDebounceTimer);
       resizeDebounceTimer = setTimeout(() => {
         if (fitAddon && term) {
           fitAddon.fit();
           sendResize(term.cols, term.rows);
-          term.scrollToBottom();
         }
-      }, 180);
+      }, 150);
     };
 
     window.addEventListener('resize', handleResize);
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleResize);
+      handleResize();
     }
   }
 

@@ -25,7 +25,7 @@ from app.server import (
     verify_session_token,
 )
 from app.switcher import get_sleep_inhibit_status, set_sleep_inhibit
-from app.terminal import compute_accept_key, encode_ws_frame, resize_pty, spawn_shell_pty
+from app.terminal import compute_accept_key, encode_ws_frame, read_ws_message, resize_pty, spawn_shell_pty
 from app.totp import compute_totp, generate_totp_secret, get_totp_uri, verify_totp
 
 
@@ -81,6 +81,26 @@ def run_checks():
     frame = encode_ws_frame(b"ping-test", 1)
     assert frame[0] == 0x81 and frame[1] == 9 and frame[2:] == b"ping-test", "Invalid WebSocket frame encoding"
 
+    # Verify binary frame encoding (opcode 2)
+    bin_frame = encode_ws_frame(b"\xf0\x9f\x98\x80 bangla \xe0\xa6\xac\xe0\xa6\xbe\xe0\xa6\x82\xe0\xa6\xb2\xe0\xa6\xbe", 2)
+    assert bin_frame[0] == 0x82, "Invalid binary frame opcode"
+
+    # Verify WebSocket fragmented message reassembly (opcode 0 continuation)
+    import socket
+    s_srv, s_cli = socket.socketpair()
+    mask1 = b"\x12\x34\x56\x78"
+    p1 = b"part1_"
+    mp1 = bytes(b ^ mask1[i % 4] for i, b in enumerate(p1))
+    s_cli.sendall(bytearray([0x02, 0x80 | len(p1)]) + mask1 + mp1)
+    p2 = b"part2_done"
+    mp2 = bytes(b ^ mask1[i % 4] for i, b in enumerate(p2))
+    s_cli.sendall(bytearray([0x80, 0x80 | len(p2)]) + mask1 + mp2)
+
+    op, assembled = read_ws_message(s_srv)
+    assert op == 2 and assembled == b"part1_part2_done", f"Frame reassembly failed: {op}, {assembled}"
+    s_srv.close()
+    s_cli.close()
+
     master_fd, shell_pid = spawn_shell_pty(rows=24, cols=80)
     assert master_fd > 0 and shell_pid > 0, "Failed to spawn shell PTY"
     import time
@@ -93,7 +113,7 @@ def run_checks():
     os.kill(shell_pid, 9)
     os.waitpid(shell_pid, 0)
     os.close(master_fd)
-    print("PASS: Terminal PTY shell lifecycle and RFC 6455 frame engine verified")
+    print("PASS: Terminal PTY shell lifecycle, fragmented frame reassembly, and RFC 6455 engine verified")
 
     # 6b. RFC 6238 TOTP Engine & 24-Hour Session Lifecycle verification
     totp_sec = generate_totp_secret()
@@ -263,13 +283,35 @@ def run_checks():
             assert 'viewport-fit=cover' in t_body_auth, "Expected viewport-fit=cover in terminal template"
         print("PASS: /terminal endpoint securely gated by authentication & mobile touch accessories verified (Zero FOUC)")
 
-        # H. Live WebSocket terminal interactive session check
+        # H. WebSocket Origin check and Session Persistence / Reattachment verification
         import socket
+
+        # 1. Reject unauthorized Origin (Cross-Site WebSocket Hijacking prevention)
+        bad_ws_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        bad_ws_sock.connect(("127.0.0.1", test_port))
+        bad_ws_req = (
+            f"GET /api/terminal/ws?token={enc_token}{otp_param}&cols=80&rows=24 HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{test_port}\r\n"
+            "Origin: http://malicious-attacker.com\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "\r\n"
+        )
+        bad_ws_sock.sendall(bad_ws_req.encode("utf-8"))
+        bad_ws_resp = bad_ws_sock.recv(1024).decode("utf-8")
+        assert "403 Forbidden" in bad_ws_resp, f"Expected 403 for unauthorized Origin, got: {bad_ws_resp}"
+        bad_ws_sock.close()
+        print("PASS: Cross-Site WebSocket Hijacking blocked via Origin verification (HTTP 403)")
+
+        # 2. Establish authorized WebSocket connection with valid Origin
         ws_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         ws_sock.connect(("127.0.0.1", test_port))
         ws_req = (
             f"GET /api/terminal/ws?token={enc_token}{otp_param}&cols=80&rows=24 HTTP/1.1\r\n"
             f"Host: 127.0.0.1:{test_port}\r\n"
+            f"Origin: http://127.0.0.1:{test_port}\r\n"
             "Upgrade: websocket\r\n"
             "Connection: Upgrade\r\n"
             "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
@@ -281,20 +323,29 @@ def run_checks():
         assert "101 Switching Protocols" in resp_hdr, f"Expected 101, got {resp_hdr}"
         assert "Sec-WebSocket-Accept" in resp_hdr, "Missing accept header in WS response"
 
-        # Send masked command 'echo WS_LIVE_OK\n'
-        cmd_bytes = b"echo WS_LIVE_OK\n"
+        # Read initial session announcement frame (Text frame, opcode 1)
+        init_frame = ws_sock.recv(1024)
+        payload_len = init_frame[1] & 0x7F
+        sess_meta = json.loads(init_frame[2:2 + payload_len].decode("utf-8"))
+        assert sess_meta.get("type") == "session", f"Expected session frame, got {sess_meta}"
+        session_id = sess_meta.get("id")
+        assert session_id and len(session_id) == 32, f"Invalid session_id: {session_id}"
+        assert sess_meta.get("reconnected") is False
+
+        # Send command 'echo WS_LIVE_OK' as Binary Frame (opcode 2) with multi-byte UTF-8
+        cmd_bytes = b"echo WS_LIVE_OK_\xe0\xa6\xac\xe0\xa6\xbe\xe0\xa6\x82\xe0\xa6\xb2\xe0\xa6\xbe\n"
         mask = b"\x11\x22\x33\x44"
         masked_payload = bytes(b ^ mask[i % 4] for i, b in enumerate(cmd_bytes))
-        ws_frame = bytearray([0x81, 0x80 | len(cmd_bytes)]) + mask + masked_payload
+        ws_frame = bytearray([0x82, 0x80 | len(cmd_bytes)]) + mask + masked_payload
         ws_sock.sendall(ws_frame)
 
-        # Read response frames from server
-        time.sleep(0.15)
+        # Read response frames from server (Streamed as binary frames opcode 2)
+        time.sleep(0.2)
         ws_sock.settimeout(2.0)
         accumulated = b""
         for _ in range(5):
             try:
-                raw_in = ws_sock.recv(2048)
+                raw_in = ws_sock.recv(4096)
                 accumulated += raw_in
                 if b"WS_LIVE_OK" in accumulated:
                     break
@@ -302,7 +353,21 @@ def run_checks():
                 break
         assert b"WS_LIVE_OK" in accumulated, f"Expected WS_LIVE_OK in PTY output, got: {accumulated}"
 
-        # Send WebSocket heartbeat ping and verify pong
+        # Send command that leaves a unique marker in ring buffer backlog
+        marker_cmd = b"echo PERSISTENCE_REPLAY_TEST\n"
+        masked_marker = bytes(b ^ mask[i % 4] for i, b in enumerate(marker_cmd))
+        ws_sock.sendall(bytearray([0x82, 0x80 | len(marker_cmd)]) + mask + masked_marker)
+        time.sleep(0.2)
+        for _ in range(5):
+            try:
+                raw_in = ws_sock.recv(4096)
+                accumulated += raw_in
+                if b"PERSISTENCE_REPLAY_TEST" in accumulated:
+                    break
+            except Exception:
+                break
+
+        # Send WebSocket heartbeat ping (Text JSON) and verify pong
         ping_bytes = b'{"type":"ping"}'
         mask_p = b"\x55\x66\x77\x88"
         masked_ping = bytes(b ^ mask_p[i % 4] for i, b in enumerate(ping_bytes))
@@ -311,14 +376,39 @@ def run_checks():
         pong_in = ws_sock.recv(1024)
         assert b'"type":"pong"' in pong_in or b"pong" in pong_in, f"Expected pong response, got {pong_in}"
 
-        # Send SGR mouse report and verify it is filtered out
-        mouse_bytes = b"\x1b[<35;9;3M"
-        masked_mouse = bytes(b ^ mask_p[i % 4] for i, b in enumerate(mouse_bytes))
-        ws_sock.sendall(bytearray([0x81, 0x80 | len(mouse_bytes)]) + mask_p + masked_mouse)
-        time.sleep(0.1)
-
+        # Now disconnect socket abruptly (simulates mobile background / network drop)
         ws_sock.close()
-        print("PASS: Live WebSocket terminal interactive session & heartbeat keep-alive verified")
+
+        # 3. Test Session Persistence: Reconnect with session_id query param
+        reconn_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        reconn_sock.connect(("127.0.0.1", test_port))
+        reconn_req = (
+            f"GET /api/terminal/ws?token={enc_token}{otp_param}&session_id={session_id}&cols=80&rows=24 HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{test_port}\r\n"
+            f"Origin: http://127.0.0.1:{test_port}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "\r\n"
+        )
+        reconn_sock.sendall(reconn_req.encode("utf-8"))
+        reconn_hdr = reconn_sock.recv(1024).decode("utf-8")
+        assert "101 Switching Protocols" in reconn_hdr, f"Expected 101 on reconnect, got: {reconn_hdr}"
+
+        # Receive session frame on reconnect
+        reconn_frame = reconn_sock.recv(1024)
+        p_len = reconn_frame[1] & 0x7F
+        reconn_meta = json.loads(reconn_frame[2:2 + p_len].decode("utf-8"))
+        assert reconn_meta.get("id") == session_id, "Reconnected to wrong session"
+        assert reconn_meta.get("reconnected") is True, "Expected reconnected=True"
+
+        # Receive backlog replay frame
+        reconn_sock.settimeout(2.0)
+        backlog_data = reconn_sock.recv(16384)
+        assert b"PERSISTENCE_REPLAY_TEST" in backlog_data, f"Backlog replay missing marker: {backlog_data}"
+        reconn_sock.close()
+        print("PASS: Live WebSocket terminal interactive session, binary frame streaming, and session persistence verified")
 
         # Test WebSocket authentication via session cookie without query token (pure cookie auth)
         ws_sock_cookie = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
