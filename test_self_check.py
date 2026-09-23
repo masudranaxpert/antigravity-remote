@@ -253,6 +253,8 @@ def run_checks():
             assert 'data-action="paste"' in t_body_auth, "Expected paste button in terminal template"
             assert 'data-action="copy"' in t_body_auth, "Expected copy button in terminal template"
             assert 'data-key="backspace"' in t_body_auth, "Expected backspace button in terminal template"
+            assert 'data-raw="."' in t_body_auth, "Expected dot button in terminal template"
+            assert 'data-raw=".."' in t_body_auth, "Expected double dot button in terminal template"
         print("PASS: /terminal endpoint securely gated by authentication & mobile touch accessories verified (Zero FOUC)")
 
         # H. Live WebSocket terminal interactive session check

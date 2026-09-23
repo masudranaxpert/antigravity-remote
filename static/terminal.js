@@ -174,22 +174,33 @@
 
     term.open(container);
 
-    // Hardening the hidden mobile textarea against Gboard predictive composition and autocorrect
+    // Hardening the hidden mobile textarea against Gboard/iOS predictive composition and autocorrect
     if (term.textarea) {
       term.textarea.setAttribute('autocapitalize', 'none');
       term.textarea.setAttribute('autocorrect', 'off');
       term.textarea.setAttribute('autocomplete', 'off');
       term.textarea.setAttribute('spellcheck', 'false');
-      // inputmode="search" neutralizes word-prediction dictionaries on mobile keyboards (Gboard/Samsung/iOS)
-      term.textarea.setAttribute('inputmode', 'search');
+      term.textarea.removeAttribute('inputmode');
       term.textarea.setAttribute('enterkeyhint', 'go');
 
-      // Intercept mobile Backspace deleteContentBackward event to guarantee deletion in shell
+      // Intercept mobile Backspace and Enter beforeinput events to guarantee shell delivery
       term.textarea.addEventListener('beforeinput', (e) => {
         if (e.inputType === 'deleteContentBackward') {
           sendInput('\x7f');
           e.preventDefault();
+          term.textarea.value = '';
+        } else if (e.inputType === 'insertLineBreak') {
+          sendInput('\r');
+          e.preventDefault();
+          term.textarea.value = '';
         }
+      });
+
+      // Clear composition buffer on compositionend to eliminate stale substring diffs
+      term.textarea.addEventListener('compositionend', () => {
+        setTimeout(() => {
+          if (term.textarea) term.textarea.value = '';
+        }, 0);
       });
     }
 
@@ -233,9 +244,14 @@
         }
         setCtrlActive(false);
         sendInput(ctrlChar);
+        if (term.textarea) term.textarea.value = '';
         return;
       }
       sendInput(data);
+      // Clean hidden textarea buffer so mobile keyboard doesn't accumulate state or misdiff punctuation
+      if (term.textarea) {
+        term.textarea.value = '';
+      }
     });
   }
 

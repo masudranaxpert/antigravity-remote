@@ -383,3 +383,9 @@ html, body {
 #toast.info #toast-icon {
   color: var(--accent);
 }
+
+/* Suppress rogue IME composition view overlay on mobile web terminals */
+.xterm .composition-view,
+.xterm .composition-view.active {
+  display: none !important;
+}
