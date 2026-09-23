@@ -153,32 +153,64 @@ def get_official_remote_info(active_email=None):
     }
 
 
-def summarize_quotas(models):
+def summarize_quotas(quota):
     """Aggregate raw model metrics into distinct Gemini and Claude quota pools."""
-    gemini = None
-    claude = None
+    def select_representative_model(models_list, fallback_name):
+        if not models_list:
+            return {"name": fallback_name, "percentage": 0, "reset_time": None}
+        
+        def get_ts(m):
+            r = m.get("reset_time")
+            if not r:
+                return "9999-12-31T23:59:59Z"
+            return r
+            
+        sorted_models = sorted(models_list, key=get_ts)
+        earliest_model = sorted_models[0]
+        latest_model = sorted_models[-1]
+        
+        # If the latest model (weekly) is completely exhausted, it's the ultimate blocker
+        if latest_model.get("percentage", 0) == 0 and latest_model.get("reset_time"):
+            chosen = latest_model
+        else:
+            # Normal case or 5-hour exhausted: show the earliest model (5-hour limit)
+            chosen = earliest_model
+            
+        return {
+            "name": fallback_name,
+            "percentage": chosen.get("percentage", 0),
+            "reset_time": chosen.get("reset_time")
+        }
 
-    for m in (models or []):
-        name = (m.get("name") or "").lower()
-        pct = m.get("percentage", 0)
-        reset = m.get("reset_time")
-
-        if "claude" in name:
-            if claude is None or "sonnet" in name:
-                claude = {"name": "Claude", "percentage": pct, "reset_time": reset}
-        elif "gemini" in name:
-            if gemini is None or "pro" in name:
-                gemini = {"name": "Gemini", "percentage": pct, "reset_time": reset}
-
-    if not gemini and models:
-        for m in models:
-            if "claude" not in (m.get("name") or "").lower():
-                gemini = {"name": "Gemini", "percentage": m.get("percentage", 0), "reset_time": m.get("reset_time")}
-                break
-
-    gem_res = gemini or {"name": "Gemini", "percentage": 0, "reset_time": None}
-    cld_res = claude or {"name": "Claude", "percentage": 0, "reset_time": None}
-    return {"gemini": gem_res, "claude": cld_res}
+    gemini_models = []
+    claude_models = []
+    
+    quota_groups = quota.get("quota_groups", [])
+    if quota_groups:
+        for g in quota_groups:
+            name = g.get("display_name", "").lower()
+            for b in g.get("buckets", []):
+                item = {
+                    "percentage": int(b.get("remaining_fraction", 0) * 100),
+                    "reset_time": b.get("reset_time")
+                }
+                if "gemini" in name:
+                    gemini_models.append(item)
+                elif "claude" in name or "gpt" in name or "3p" in name:
+                    claude_models.append(item)
+    else:
+        for m in (quota.get("models") or []):
+            name = (m.get("name") or "").lower()
+            if "claude" in name:
+                claude_models.append(m)
+            else:
+                # Assume everything else is Gemini
+                gemini_models.append(m)
+            
+    return {
+        "gemini": select_representative_model(gemini_models, "Gemini"),
+        "claude": select_representative_model(claude_models, "Claude")
+    }
 
 
 def load_accounts():
@@ -219,7 +251,7 @@ def load_accounts():
             if is_current:
                 matched_current_id = acc.get("id")
 
-            summary = summarize_quotas(quota.get("models", []))
+            summary = summarize_quotas(quota)
             accounts.append({
                 "id": acc["id"],
                 "email": acc["email"],
