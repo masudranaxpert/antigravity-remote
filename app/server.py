@@ -344,7 +344,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "Set-Cookie",
                     f"mrt={set_cookie_token}; Path=/; Max-Age={SESSION_MAX_AGE}; HttpOnly; SameSite=Lax",
                 )
-            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
             self.end_headers()
             self.wfile.write(content)
         except (BrokenPipeError, ConnectionResetError, OSError):

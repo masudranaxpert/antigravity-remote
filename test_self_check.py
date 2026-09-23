@@ -505,7 +505,7 @@ def run_checks():
         with open(os.path.join(repo_dir, "static", "terminal.js"), "r", encoding="utf-8") as f_term:
             term_js = f_term.read()
             assert "isMobileDevice" in term_js, "Expected mobile detection in terminal.js"
-            assert "type = 'password'" in term_js or 'type = "password"' in term_js, "Expected password input adapter for mobile keyboards"
+            assert "type = 'text'" in term_js and "type = 'password'" in term_js, "Expected delayed password flip adapter for mobile keyboards"
             assert "autocomplete" in term_js and "one-time-code" in term_js, "Expected autocomplete=one-time-code to suppress browser password save"
         print("PASS: Mobile keyboard password adapter verified (immediate character dispatch without spacebar lag)")
 
@@ -519,7 +519,7 @@ try {{
   document.createElement = function(t, ...a) {{
     if (typeof t === 'string' && t.toLowerCase() === 'textarea') {{
       const el = orig.call(document, 'input', ...a);
-      el.type = 'password';
+      el.type = 'text';
       return el;
     }}
     return orig.call(document, t, ...a);
@@ -527,13 +527,16 @@ try {{
   const term = new Terminal();
   term.open(document.getElementById('term'));
   document.createElement = orig;
+  setTimeout(() => {{ term.textarea.type = 'password'; }}, 100);
   let received = [];
   term.onData(d => received.push(d));
-  term.textarea.value = 'l';
-  term.textarea.dispatchEvent(new InputEvent('input', {{ data: 'l', inputType: 'insertText' }}));
-  term.textarea.value = 's';
-  term.textarea.dispatchEvent(new InputEvent('input', {{ data: 's', inputType: 'insertText' }}));
-  document.getElementById('res').textContent = (term.textarea.tagName === 'INPUT' && term.textarea.type === 'password' && received.join('') === 'ls') ? 'OK' : 'FAIL';
+  setTimeout(() => {{
+    term.textarea.value = 'l';
+    term.textarea.dispatchEvent(new InputEvent('input', {{ data: 'l', inputType: 'insertText' }}));
+    term.textarea.value = 's';
+    term.textarea.dispatchEvent(new InputEvent('input', {{ data: 's', inputType: 'insertText' }}));
+    document.getElementById('res').textContent = (term.textarea.tagName === 'INPUT' && term.textarea.type === 'password' && received.join('') === 'ls') ? 'OK' : 'FAIL';
+  }}, 200);
 }} catch (e) {{ document.getElementById('res').textContent = 'ERR:' + e; }}
 </script></body></html>"""
             import tempfile, subprocess
@@ -541,7 +544,7 @@ try {{
                 tf.write(chrome_test_html)
                 t_name = tf.name
             try:
-                c_out = subprocess.check_output(["google-chrome", "--headless=new", "--dump-dom", f"file://{t_name}"]).decode()
+                c_out = subprocess.check_output(["google-chrome", "--headless=new", "--dump-dom", "--virtual-time-budget=1000", f"file://{t_name}"]).decode()
                 assert '<div id="res">OK</div>' in c_out, f"Chrome mobile terminal simulation failed: {c_out}"
                 print("PASS: Headless Chrome live validation of mobile input adapter passed (emits 'ls' immediately)")
             finally:

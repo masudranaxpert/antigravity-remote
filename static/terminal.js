@@ -247,8 +247,8 @@
     }
 
     // Mobile soft keyboards (Gboard/Android/iOS) treat standard textareas as IME composition targets,
-    // buffering typed words until the spacebar is pressed. Swapping xterm's internal helper element
-    // to input[type=password] disables predictive composition and streams every keystroke immediately.
+    // buffering typed words until the spacebar is pressed. Creating as type=text first dodges Chrome's
+    // autofill password scanner, then flipping to type=password post-open disables Gboard prediction.
     const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
                            ('ontouchstart' in window) ||
                            (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
@@ -258,7 +258,7 @@
       document.createElement = function (tag, ...args) {
         if (typeof tag === 'string' && tag.toLowerCase() === 'textarea') {
           const el = origCreateElement.call(document, 'input', ...args);
-          el.type = 'password';
+          el.type = 'text';
           el.setAttribute('autocomplete', 'one-time-code');
           el.setAttribute('data-1p-ignore', 'true');
           el.setAttribute('data-lpignore', 'true');
@@ -273,6 +273,11 @@
 
     if (isMobileDevice) {
       document.createElement = origCreateElement;
+      // Flip to password AFTER Chrome's autofill scan completes (~DOMContentLoaded)
+      // to disable Gboard predictive text without triggering password save popup
+      if (term.textarea) {
+        setTimeout(() => { term.textarea.type = 'password'; }, 300);
+      }
     }
 
     if (document.fonts && document.fonts.ready) {
