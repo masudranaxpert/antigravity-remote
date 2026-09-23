@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import pty
+import queue
 import secrets
 import select
 import signal
@@ -213,6 +214,68 @@ def spawn_shell_pty(rows: int = 24, cols: int = 80):
     return master_fd, pid
 
 
+class ClientConn:
+    """Manages asynchronous outbound WebSocket frame queue for an active client connection."""
+
+    def __init__(self, sock):
+        self.sock = sock
+        self.q = queue.Queue(maxsize=256)
+        self.alive = True
+        try:
+            self.sock.settimeout(10)
+        except Exception:
+            pass
+        self._sender_thread = threading.Thread(target=self._sender_loop, daemon=True)
+        self._sender_thread.start()
+
+    def send(self, frame: bytes) -> bool:
+        """Enqueue frame for transmission without blocking caller or holding locks."""
+        if not self.alive:
+            return False
+        try:
+            self.q.put_nowait(frame)
+            return True
+        except queue.Full:
+            # Slow or dead client: drop connection to prevent stalling PTY shell
+            self.close(close_code=1008, reason="Buffer overflow")
+            return False
+
+    def close(self, close_code: int = 1000, reason: str = ""):
+        """Close connection cleanly with RFC 6455 close frame."""
+        if not self.alive:
+            return
+        self.alive = False
+        try:
+            payload = struct.pack("!H", close_code) + reason.encode("utf-8")[:123]
+            frame = encode_ws_frame(payload, opcode=8)
+            self.sock.sendall(frame)
+        except Exception:
+            pass
+        try:
+            self.sock.close()
+        except Exception:
+            pass
+
+    def _sender_loop(self):
+        """Dedicated writer thread continuously flushing queue to socket."""
+        while self.alive:
+            try:
+                frame = self.q.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if not self.alive:
+                break
+            try:
+                self.sock.sendall(frame)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                self.alive = False
+                try:
+                    self.sock.close()
+                except Exception:
+                    pass
+                break
+
+
 class PTYProcess:
     """Manages independent, persistent PTY shell process and output ring buffer."""
 
@@ -223,9 +286,10 @@ class PTYProcess:
         self.master_fd = None
         self.child_pid = None
         self.alive = True
+        self.natural_exit = False
         self.lock = threading.RLock()
         self.ring_buffer = bytearray()
-        self.active_sock = None
+        self.active_conn: ClientConn | None = None
         self.last_active = time.time()
         self._reader_thread = None
 
@@ -256,6 +320,7 @@ class PTYProcess:
                     break
                 data = os.read(fd, 4096)
                 if not data:
+                    self.natural_exit = True
                     break
 
                 # Coalesce burst output over a tiny 5ms window to reduce network frame thrashing
@@ -273,22 +338,21 @@ class PTYProcess:
                         break
 
                 chunk = bytes(burst)
+                frame = encode_ws_frame(chunk, opcode=2)
+                conn_to_stream = None
                 with self.lock:
                     self.last_active = time.time()
-                    # Append to ring buffer, trimming oldest bytes if exceeding capacity
                     self.ring_buffer.extend(chunk)
                     if len(self.ring_buffer) > RING_BUFFER_CAPACITY:
                         excess = len(self.ring_buffer) - RING_BUFFER_CAPACITY
                         del self.ring_buffer[:excess]
+                    conn_to_stream = self.active_conn
 
-                    sock = self.active_sock
-                    if sock is not None:
-                        try:
-                            # Stream as RFC 6455 Binary Frame (opcode 2) - eliminates UTF-8 boundary 1007 drops
-                            sock.sendall(encode_ws_frame(chunk, opcode=2))
-                        except (BrokenPipeError, ConnectionResetError, OSError):
-                            self.active_sock = None
-            except (OSError, BrokenPipeError):
+                # Stream OUTSIDE lock: eliminates network stalls freezing the PTY session!
+                if conn_to_stream is not None:
+                    conn_to_stream.send(frame)
+            except OSError:
+                self.natural_exit = True
                 break
 
         self.close()
@@ -314,39 +378,48 @@ class PTYProcess:
         if fd is not None:
             resize_pty(fd, rows, cols)
 
-    def attach(self, sock) -> bytes:
-        """Attach active WebSocket connection and return buffered output backlog for replay."""
+    def attach(self, conn: ClientConn, rows: int, cols: int) -> bytes:
+        """Attach active WebSocket client connection and return buffered output backlog for replay."""
+        old_conn = None
         with self.lock:
-            self.active_sock = sock
+            old_conn = self.active_conn
+            self.active_conn = conn
             self.last_active = time.time()
-            return bytes(self.ring_buffer)
+            backlog = bytes(self.ring_buffer)
 
-    def detach(self, sock=None):
-        """Detach socket when client disconnects (preserves running PTY and shell!)."""
+        # Disconnect old client to prevent zombie connection
+        if old_conn and old_conn != conn:
+            old_conn.close(close_code=4000, reason="Session attached on another client")
+
+        self.resize(rows, cols)
+        return backlog
+
+    def detach(self, conn=None):
+        """Detach connection when client disconnects (preserves running PTY and shell!)."""
         with self.lock:
-            if sock is None or self.active_sock == sock:
-                self.active_sock = None
+            if conn is None or self.active_conn == conn:
+                self.active_conn = None
                 self.last_active = time.time()
 
-    def close(self):
+    def close(self, close_code: int = 1000, reason: str = ""):
         """Terminate process group and clean up file descriptors."""
+        if self.natural_exit:
+            close_code = 4001
+            reason = "Shell process exited"
+
         with self.lock:
             if not self.alive:
                 return
             self.alive = False
-            sock = self.active_sock
-            self.active_sock = None
+            conn = self.active_conn
+            self.active_conn = None
             fd = self.master_fd
             self.master_fd = None
             pid = self.child_pid
             self.child_pid = None
 
-        if sock is not None:
-            try:
-                sock.sendall(encode_ws_frame(b"", opcode=8))
-                sock.close()
-            except Exception:
-                pass
+        if conn is not None:
+            conn.close(close_code=close_code, reason=reason)
 
         if fd is not None:
             try:
@@ -425,11 +498,13 @@ class PTYSessionManager:
             with self.lock:
                 for sid, proc in list(self.sessions.items()):
                     if not proc.alive:
-                        to_close.append(sid)
-                    elif proc.active_sock is None and (now - proc.last_active > IDLE_SESSION_TTL):
-                        to_close.append(sid)
-                for sid in to_close:
-                    self.sessions.pop(sid, None)
+                        to_close.append(proc)
+                        self.sessions.pop(sid, None)
+                    elif proc.active_conn is None and (now - proc.last_active > IDLE_SESSION_TTL):
+                        to_close.append(proc)
+                        self.sessions.pop(sid, None)
+            for proc in to_close:
+                proc.close(close_code=4001, reason="Session expired")
 
 
 SESSION_MANAGER = PTYSessionManager()
@@ -450,6 +525,7 @@ class TerminalSession:
 
     def __init__(self, sock, rows: int = 24, cols: int = 80, session_id: str | None = None):
         self.sock = sock
+        self.conn = ClientConn(sock)
         self.rows = rows
         self.cols = cols
         self.requested_session_id = session_id
@@ -463,14 +539,11 @@ class TerminalSession:
                 self.requested_session_id, self.rows, self.cols
             )
         except Exception:
-            try:
-                self.sock.close()
-            except Exception:
-                pass
+            self.conn.close()
             return
 
-        # Attach socket and retrieve buffer backlog
-        backlog = self.pty_proc.attach(self.sock)
+        # Attach connection and retrieve buffer backlog (also resizes PTY on attach)
+        backlog = self.pty_proc.attach(self.conn, self.rows, self.cols)
 
         try:
             # 1. Send session identity frame as text JSON
@@ -479,42 +552,33 @@ class TerminalSession:
                 "id": self.pty_proc.session_id,
                 "reconnected": not is_new,
             }).encode("utf-8")
-            self.sock.sendall(encode_ws_frame(meta, opcode=1))
+            self.conn.send(encode_ws_frame(meta, opcode=1))
 
             # 2. Replay terminal backlog as binary frame so client screen repaints
             if backlog:
-                self.sock.sendall(encode_ws_frame(backlog, opcode=2))
+                self.conn.send(encode_ws_frame(backlog, opcode=2))
 
             # 3. Enter WebSocket client -> PTY input pump
             self._ws_to_pty_pump()
         finally:
-            # On disconnect: detach socket but leave shell process running in background!
+            # On disconnect: detach connection but leave shell process running in background!
             if self.pty_proc:
-                self.pty_proc.detach(self.sock)
-            try:
-                self.sock.close()
-            except Exception:
-                pass
+                self.pty_proc.detach(self.conn)
+            self.conn.close()
 
     def _ws_to_pty_pump(self):
         """Read incoming WebSocket frames and route to PTY or control dispatcher."""
-        while self.pty_proc and self.pty_proc.alive:
+        while self.pty_proc and self.pty_proc.alive and self.conn.alive:
             # Enforce 24-hour max connection duration security ceiling
             if time.time() - self.connected_at > 86400:
-                try:
-                    self.sock.sendall(encode_ws_frame(b"", opcode=8))
-                except Exception:
-                    pass
+                self.conn.close(close_code=1000, reason="24-hour session limit reached")
                 break
 
             opcode, payload = read_ws_message(self.sock)
             if opcode is None or opcode == 8:  # Connection close or reset
                 break
             if opcode == 9:  # Ping -> reply with Pong
-                try:
-                    self.sock.sendall(encode_ws_frame(payload, opcode=10))
-                except Exception:
-                    break
+                self.conn.send(encode_ws_frame(payload, opcode=10))
                 continue
             if opcode == 10:  # Pong received
                 continue
@@ -526,7 +590,7 @@ class TerminalSession:
                     if isinstance(ctrl, dict):
                         msg_type = ctrl.get("type")
                         if msg_type == "ping":
-                            self.sock.sendall(encode_ws_frame(b'{"type":"pong"}', opcode=1))
+                            self.conn.send(encode_ws_frame(b'{"type":"pong"}', opcode=1))
                             handled_ctrl = True
                         elif msg_type == "resize":
                             r = int(ctrl.get("rows", 24))
@@ -542,3 +606,4 @@ class TerminalSession:
             if opcode == 2:  # Binary frame -> raw keystrokes / terminal input
                 if self.pty_proc:
                     self.pty_proc.write(payload)
+

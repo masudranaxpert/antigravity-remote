@@ -17,6 +17,7 @@
   let toastTimer = null;
   let heartbeatTimer = null;
   let pongTimeoutTimer = null;
+  let debouncedFitTimer = null;
   let reconnectAttempts = 0;
   let isManuallyClosed = false;
   let isReconnecting = false;
@@ -24,13 +25,14 @@
   let lastSentCols = -1;
   let lastSentRows = -1;
   let currentSessionId = '';
+  const SESSION_KEY = 'remote_term_session_id';
   const MAX_RECONNECT_ATTEMPTS = 15;
 
   try {
-    currentSessionId = sessionStorage.getItem('remote_term_session_id') || '';
+    currentSessionId = sessionStorage.getItem(SESSION_KEY) || '';
   } catch (_) {}
 
-  // Lightweight haptic vibration feedback for mobile touches
+  // Lightweight haptic vibration feedback for modifier key toggles
   function triggerHaptic(duration = 12) {
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
       try {
@@ -140,13 +142,11 @@
     stopHeartbeat();
     heartbeatTimer = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN) {
-        // Ping control packet
         ws.send(JSON.stringify({ type: 'ping' }));
         clearTimeout(pongTimeoutTimer);
-        // Half-open connection detection: if pong does not arrive within 8s, trigger reconnect
         pongTimeoutTimer = setTimeout(() => {
           if (ws && ws.readyState === WebSocket.OPEN) {
-            showToast('Heartbeat timeout, reconnecting...', 'info');
+            showToast('Connection stalled, reconnecting...', 'info');
             ws.close();
           }
         }, 8000);
@@ -172,25 +172,17 @@
     }
   }
 
-  function scheduleReconnect() {
-    if (isManuallyClosed || isReconnecting) return;
-    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      setStatus(false, 'disconnected (max retries)');
-      showToast('Terminal connection dropped. Tap refresh button to reconnect.', 'err');
-      return;
-    }
-    isReconnecting = true;
-    reconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(1.3, reconnectAttempts), 5000);
-    setStatus(false, `reconnecting (${reconnectAttempts})...`);
-    clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(() => {
-      isReconnecting = false;
-      connectWebSocket();
+  function debouncedFit(delay = 180) {
+    clearTimeout(debouncedFitTimer);
+    debouncedFitTimer = setTimeout(() => {
+      if (fitAddon && term) {
+        fitAddon.fit();
+        sendResize(term.cols, term.rows);
+      }
     }, delay);
   }
 
-  // Sanitizes mobile smart punctuation (curly quotes, em-dashes, non-breaking spaces) on soft keyboard
+  // Sanitizes mobile smart punctuation (curly quotes, em-dashes, non-breaking spaces)
   function sanitizeTerminalInput(data) {
     if (!data) return data;
     return data
@@ -223,7 +215,7 @@
     term = new Terminal({
       theme: STUDIO_THEME,
       fontSize: currentFontSize,
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, Consolas, monospace",
       cursorBlink: true,
       cursorStyle: 'bar',
       cursorWidth: 2,
@@ -240,12 +232,15 @@
 
     term.open(container);
 
-    // Initial measurement
-    if (fitAddon) {
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => {
+        if (fitAddon) fitAddon.fit();
+      });
+    } else if (fitAddon) {
       fitAddon.fit();
     }
 
-    // Hardening mobile helper textarea against unwanted autocorrect and tracking composition
+    // Hardening mobile helper textarea against unwanted autocorrect
     if (term.textarea) {
       term.textarea.setAttribute('autocapitalize', 'none');
       term.textarea.setAttribute('autocorrect', 'off');
@@ -277,14 +272,18 @@
           term.textarea.value = '';
         } else if (e.inputType === 'insertReplacementText') {
           // Autocorrect or Gboard suggestion replacement
-          const newText = (e.dataTransfer ? e.dataTransfer.getData('text/plain') : e.data) || '';
-          if (newText) {
-            const prevLen = term.textarea.value.length;
-            const backspaces = '\x7f'.repeat(Math.max(1, prevLen));
-            sendInput(backspaces + newText);
-            e.preventDefault();
-            term.textarea.value = '';
+          let newText = (e.dataTransfer ? e.dataTransfer.getData('text/plain') : e.data) || '';
+          newText = sanitizeTerminalInput(newText);
+          let deleteCount = 1;
+          if (typeof e.getTargetRanges === 'function') {
+            const ranges = e.getTargetRanges();
+            if (ranges && ranges.length > 0) {
+              deleteCount = Math.max(1, ranges[0].endOffset - ranges[0].startOffset);
+            }
           }
+          sendInput('\x7f'.repeat(deleteCount) + newText);
+          e.preventDefault();
+          term.textarea.value = '';
         }
       });
     }
@@ -307,13 +306,10 @@
         if (Date.now() - lastTouchTime < 650) {
           return;
         }
-        // Desktop mouse event: allow through to TUI app!
       }
 
-      // Sanitize single interactive character typing
-      if (data.length === 1) {
-        data = sanitizeTerminalInput(data);
-      }
+      // Sanitize input universally across all typing paths
+      data = sanitizeTerminalInput(data);
 
       if (isCtrlActive && data.length === 1) {
         const code = data.charCodeAt(0);
@@ -329,7 +325,7 @@
         return;
       }
 
-      if (isAltActive && data.length >= 1) {
+      if (isAltActive && data.length === 1) {
         setAltActive(false);
         sendInput('\x1b' + data);
         if (term.textarea && !isComposing) term.textarea.value = '';
@@ -337,15 +333,13 @@
       }
 
       sendInput(data);
-      if (term.textarea && !isComposing) {
-        term.textarea.value = '';
-      }
     });
 
-    // Mobile tap-to-focus and long-press (550ms) to open native Select Mode overlay
+    // Unified Mobile Touch Gestures on Terminal Container
     let touchStartTime = 0;
     let touchStartX = 0;
     let touchStartY = 0;
+    let altScrollLastY = 0;
     let longPressTimer = null;
 
     container.addEventListener('touchstart', (e) => {
@@ -355,25 +349,42 @@
       touchStartX = t.clientX;
       touchStartY = t.clientY;
       touchStartTime = Date.now();
+      altScrollLastY = touchStartY;
 
       clearTimeout(longPressTimer);
       longPressTimer = setTimeout(() => {
-        longPressTimer = null;
-        triggerHaptic(25);
-        openSelectMode();
+        if (!term || !term.hasSelection()) {
+          triggerHaptic(20);
+          openSelectMode();
+        }
       }, 550);
     }, { passive: true });
 
     container.addEventListener('touchmove', (e) => {
-      if (!longPressTimer) return;
+      lastTouchTime = Date.now();
+      if (e.touches.length !== 1) return;
       const t = e.touches[0];
-      if (t && Math.hypot(t.clientX - touchStartX, t.clientY - touchStartY) > 10) {
+      if (Math.hypot(t.clientX - touchStartX, t.clientY - touchStartY) > 10) {
         clearTimeout(longPressTimer);
         longPressTimer = null;
+      }
+
+      // Alt-screen wheel scrolling if mouse reporting is active
+      if (term && term.buffer && term.buffer.active && term.buffer.active.type === 'alternate') {
+        const hasMouse = Boolean(term.modes && term.modes.mouseTracking && term.modes.mouseTracking !== 'none');
+        if (hasMouse) {
+          const dy = altScrollLastY - t.clientY;
+          if (Math.abs(dy) >= 20) {
+            const wheelCode = dy > 0 ? 65 : 64; // 64 = Up, 65 = Down
+            sendInput(`\x1b[<${wheelCode};1;1M`);
+            altScrollLastY = t.clientY;
+          }
+        }
       }
     }, { passive: true });
 
     container.addEventListener('touchend', (e) => {
+      lastTouchTime = Date.now();
       clearTimeout(longPressTimer);
       longPressTimer = null;
       if (Date.now() - touchStartTime < 250 && e.changedTouches.length === 1) {
@@ -384,38 +395,12 @@
           }
         }
       }
-    });
+    }, { passive: true });
 
     container.addEventListener('touchcancel', () => {
       clearTimeout(longPressTimer);
       longPressTimer = null;
     });
-
-    // Alt-screen touch scrolling: In htop, vim, nano, translate vertical swipes into arrow keys
-    let altScrollStartY = 0;
-    let altScrollLastY = 0;
-    container.addEventListener('touchstart', (e) => {
-      if (e.touches.length === 1) {
-        altScrollStartY = e.touches[0].clientY;
-        altScrollLastY = altScrollStartY;
-      }
-    }, { passive: true });
-
-    container.addEventListener('touchmove', (e) => {
-      if (!term || e.touches.length !== 1) return;
-      if (term.buffer && term.buffer.active && term.buffer.active.type === 'alternate') {
-        const y = e.touches[0].clientY;
-        const dy = altScrollLastY - y;
-        if (Math.abs(dy) >= 18) {
-          if (dy > 0) {
-            sendInput(getArrowKey('B')); // Down
-          } else {
-            sendInput(getArrowKey('A')); // Up
-          }
-          altScrollLastY = y;
-        }
-      }
-    }, { passive: true });
 
     // Floating Scroll-to-Bottom button setup
     const scrollBottomBtn = document.getElementById('scroll-bottom-btn');
@@ -423,7 +408,6 @@
       scrollBottomBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        triggerHaptic(12);
         if (term) {
           term.scrollToBottom();
           scrollBottomBtn.hidden = true;
@@ -441,7 +425,7 @@
   function connectWebSocket() {
     clearTimeout(reconnectTimer);
     isReconnecting = false;
-    setStatus(false, reconnectAttempts > 0 ? `reconnecting...` : 'connecting...');
+    setStatus(false, reconnectAttempts > 0 ? 'reconnecting...' : 'connecting...');
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const cols = term ? term.cols : 80;
@@ -468,30 +452,27 @@
       ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer'; // RFC 6455 Binary Frame handling
     } catch (err) {
-      setStatus(false, 'connection error');
+      setStatus(false, 'error');
       showToast('WebSocket error: ' + err.message, 'err');
       scheduleReconnect();
       return;
     }
 
     ws.onopen = () => {
-      const wasReconnecting = reconnectAttempts > 0;
       reconnectAttempts = 0;
       isManuallyClosed = false;
-      isReconnecting = false;
-      startHeartbeat();
-      setStatus(true, 'bash • remote');
-      showToast(wasReconnecting ? 'Terminal reconnected' : 'Connected to host terminal', 'ok');
-      if (fitAddon && term) {
-        fitAddon.fit();
+      setStatus(true, 'bash');
+      lastSentCols = -1;
+      lastSentRows = -1;
+      if (term) {
         sendResize(term.cols, term.rows);
       }
-      term.focus();
+      startHeartbeat();
     };
 
     ws.onmessage = (event) => {
       if (event.data instanceof ArrayBuffer) {
-        // Binary PTY terminal output: feeds xterm streaming UTF-8 decoder directly
+        // Stream PTY binary output chunk straight into xterm streaming decoder
         if (term) {
           term.write(new Uint8Array(event.data));
         }
@@ -509,16 +490,38 @@
           if (msg.type === 'session') {
             currentSessionId = msg.id;
             try {
-              sessionStorage.setItem('remote_term_session_id', msg.id);
+              sessionStorage.setItem(SESSION_KEY, msg.id);
             } catch (_) {}
+            if (msg.reconnected && term) {
+              term.reset();
+              // Nudge resize to trigger SIGWINCH in TUI apps
+              setTimeout(() => {
+                sendResize(term.cols - 1, term.rows);
+                setTimeout(() => sendResize(term.cols, term.rows), 60);
+              }, 80);
+            }
             return;
           }
         } catch (_) {}
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       stopHeartbeat();
+      if (event && event.code === 4000) {
+        // Detached because attached on another device
+        try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
+        setStatus(false, 'detached');
+        showToast('Session opened on another device/tab', 'info');
+        return;
+      }
+      if (event && event.code === 4001) {
+        // Shell process terminated cleanly
+        try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
+        setStatus(false, 'finished');
+        showToast('Shell process exited', 'info');
+        return;
+      }
       if (!isManuallyClosed) {
         scheduleReconnect();
       } else {
@@ -532,27 +535,51 @@
     };
   }
 
+  function scheduleReconnect() {
+    if (isManuallyClosed || isReconnecting) return;
+    isReconnecting = true;
+    reconnectAttempts++;
+
+    if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+      setStatus(false, 'disconnected');
+      showToast('Connection lost. Please tap Reconnect.', 'err');
+      isReconnecting = false;
+      return;
+    }
+
+    const delay = Math.min(6000, 400 * Math.pow(1.4, reconnectAttempts));
+    setStatus(false, `reconnecting...`);
+
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      connectWebSocket();
+    }, delay);
+  }
+
   function setCtrlActive(active) {
     isCtrlActive = active;
     const btn = document.getElementById('ctrl-toggle-btn');
     if (btn) {
-      if (isCtrlActive) {
-        btn.classList.add('active');
-      } else {
-        btn.classList.remove('active');
-      }
+      btn.classList.toggle('active', isCtrlActive);
     }
+    triggerHaptic(12);
   }
 
   function setAltActive(active) {
     isAltActive = active;
     const btn = document.getElementById('alt-toggle-btn');
     if (btn) {
-      if (isAltActive) {
-        btn.classList.add('active');
-      } else {
-        btn.classList.remove('active');
-      }
+      btn.classList.toggle('active', isAltActive);
+    }
+    triggerHaptic(12);
+  }
+
+  function changeFontSize(delta) {
+    currentFontSize = Math.min(20, Math.max(10, currentFontSize + delta));
+    if (term) {
+      term.options.fontSize = currentFontSize;
+      if (fitAddon) fitAddon.fit();
+      sendResize(term.cols, term.rows);
     }
   }
 
@@ -563,7 +590,6 @@
     let activeEl = null;
 
     container.addEventListener('pointerdown', (e) => {
-      // Prevent losing focus on term.textarea when tapping accessory buttons
       const el = e.target.closest(selector);
       if (el) {
         e.preventDefault();
@@ -585,7 +611,6 @@
       const el = e.target.closest(selector);
       if (!el || el !== activeEl) return;
       e.preventDefault();
-      triggerHaptic(10);
       onTrigger(el);
       activeEl = null;
     });
@@ -601,17 +626,44 @@
     });
   }
 
+  async function copyTextToClipboard(text, successMsg = 'Copied to clipboard') {
+    if (!text) return false;
+    let copied = false;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch (_) {}
+    }
+    if (!copied) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        copied = true;
+      } catch (_) {}
+    }
+    if (copied) {
+      triggerHaptic(12);
+      showToast(successMsg, 'ok');
+    } else {
+      showToast('Copy failed or permission denied', 'err');
+    }
+    return copied;
+  }
+
   async function handlePaste() {
-    triggerHaptic(12);
     try {
       if (navigator.clipboard && navigator.clipboard.readText) {
         const text = await navigator.clipboard.readText();
         if (text) {
-          if (term) {
-            term.paste(text); // Respects bracketed paste mode!
-          } else {
-            sendInput(text);
-          }
+          if (term) term.paste(text);
+          else sendInput(text);
           showToast('Pasted from clipboard', 'ok');
         } else {
           showToast('Clipboard is empty', 'info');
@@ -633,7 +685,6 @@
     if (term) term.focus();
   }
 
-  // Opens native mobile text selection overlay snapshotting active terminal buffer
   function openSelectMode() {
     if (!term) return;
     const overlay = document.getElementById('select-overlay');
@@ -681,84 +732,28 @@
       showToast('No text available to copy', 'info');
       return;
     }
-
-    let copied = false;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      try {
-        await navigator.clipboard.writeText(textToCopy);
-        copied = true;
-      } catch (_) {}
-    }
-    if (!copied) {
-      try {
-        const ta = document.createElement('textarea');
-        ta.value = textToCopy;
-        ta.style.position = 'fixed';
-        ta.style.left = '-9999px';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        copied = true;
-      } catch (_) {}
-    }
-
-    if (copied) {
-      triggerHaptic(15);
-      showToast(`Copied ${textToCopy.length} characters`, 'ok');
-    } else {
-      showToast('Copy failed or permission denied', 'err');
-    }
+    await copyTextToClipboard(textToCopy, `Copied ${textToCopy.length} characters`);
   }
 
   async function handleCopy() {
-    triggerHaptic(12);
-    // If xterm has an active mouse/desktop selection, copy it directly
     if (term && term.hasSelection()) {
       const selection = term.getSelection();
       if (selection) {
-        let copied = false;
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          try {
-            await navigator.clipboard.writeText(selection);
-            copied = true;
-          } catch (_) {}
-        }
-        if (!copied) {
-          try {
-            const ta = document.createElement('textarea');
-            ta.value = selection;
-            ta.style.position = 'fixed';
-            ta.style.left = '-9999px';
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand('copy');
-            document.body.removeChild(ta);
-            copied = true;
-          } catch (_) {}
-        }
-        if (copied) {
-          showToast(`Copied ${selection.length} chars to clipboard`, 'ok');
-          if (term) term.focus();
-          return;
-        }
+        await copyTextToClipboard(selection, `Copied ${selection.length} chars`);
+        if (term) term.focus();
+        return;
       }
     }
-
-    // On mobile touch devices without selection, open native Select Mode overlay
     openSelectMode();
   }
 
   function toggleSoftKeyboard() {
     if (!term || !term.textarea) return;
-    triggerHaptic(12);
     const isFocused = (document.activeElement === term.textarea);
     if (isFocused) {
       term.textarea.blur();
-      showToast('Keyboard dismissed', 'info');
     } else {
       term.textarea.focus({ preventScroll: true });
-      showToast('Keyboard focused', 'ok');
     }
   }
 
@@ -768,7 +763,6 @@
     if (!drawer) return;
     const shouldOpen = (forceState !== undefined) ? forceState : drawer.hidden;
     drawer.hidden = !shouldOpen;
-    triggerHaptic(10);
     if (shouldOpen && input) {
       setTimeout(() => input.focus(), 80);
     } else if (!shouldOpen && term && term.textarea) {
@@ -781,9 +775,9 @@
     if (!input) return;
     const rawVal = input.value;
     if (!rawVal) return;
-    triggerHaptic(15);
     if (term) {
-      term.paste(rawVal + '\r');
+      term.paste(rawVal);
+      sendInput('\r');
     } else {
       sendInput(rawVal + '\r');
     }
@@ -799,115 +793,127 @@
       const key = btn.getAttribute('data-key');
       const raw = btn.getAttribute('data-raw');
       const action = btn.getAttribute('data-action');
+      const id = btn.id;
 
-      if (btn.id === 'ctrl-toggle-btn') {
+      if (id === 'ctrl-toggle-btn') {
         setCtrlActive(!isCtrlActive);
         return;
       }
-
-      if (btn.id === 'alt-toggle-btn') {
+      if (id === 'alt-toggle-btn') {
         setAltActive(!isAltActive);
         return;
       }
-
       if (action === 'paste') {
         handlePaste();
         return;
       }
-
       if (action === 'copy') {
         handleCopy();
+        return;
+      }
+      if (id === 'composer-acc-btn') {
+        toggleComposer();
         return;
       }
 
       if (raw) {
         sendInput(raw);
-        if (term) term.focus();
+        if (term && term.textarea) term.textarea.focus({ preventScroll: true });
         return;
       }
 
-      switch (key) {
-        case 'escape':
-          sendInput('\x1b');
-          return;
-        case 'enter':
-          sendInput('\r');
-          break;
-        case 'backspace':
-          sendInput('\x7f');
-          break;
-        case 'tab':
-          sendInput('\t');
-          break;
-        case 'ctrl-c':
-          sendInput('\x03');
-          break;
-        case 'ctrl-d':
-          sendInput('\x04');
-          break;
-        case 'ctrl-l':
-          sendInput('\x0c');
-          break;
-        case 'arrow-up':
-          sendInput(getArrowKey('A'));
-          break;
-        case 'arrow-down':
-          sendInput(getArrowKey('B'));
-          break;
-        case 'arrow-left':
-          sendInput(getArrowKey('D'));
-          break;
-        case 'arrow-right':
-          sendInput(getArrowKey('C'));
-          break;
-        default:
-          break;
-      }
-
-      if (term) term.focus();
-    });
-  }
-
-  function initQuickChips() {
-    const bar = document.getElementById('quick-commands-bar');
-    if (!bar) return;
-
-    attachTapHandler(bar, '.quick-chip', (chip) => {
-      const cmd = chip.getAttribute('data-cmd');
-      if (cmd) {
-        triggerHaptic(12);
-        // Prefix with Ctrl+U (\x15) to clear any half-typed text on the prompt first
-        sendInput('\x15' + cmd);
-        if (term) term.focus();
+      if (key) {
+        switch (key) {
+          case 'escape':
+            sendInput('\x1b');
+            break;
+          case 'backspace':
+            sendInput('\x7f');
+            break;
+          case 'tab':
+            sendInput('\t');
+            break;
+          case 'ctrl-c':
+            sendInput('\x03');
+            break;
+          case 'arrow-up':
+            sendInput(getArrowKey('A'));
+            break;
+          case 'arrow-down':
+            sendInput(getArrowKey('B'));
+            break;
+          case 'arrow-right':
+            sendInput(getArrowKey('C'));
+            break;
+          case 'arrow-left':
+            sendInput(getArrowKey('D'));
+            break;
+        }
+        if (term && term.textarea) term.textarea.focus({ preventScroll: true });
       }
     });
   }
 
-  function initTools() {
-    const reconnectBtn = document.getElementById('reconnect-btn');
-    if (reconnectBtn) {
-      reconnectBtn.addEventListener('click', () => {
-        triggerHaptic(12);
-        reconnectAttempts = 0;
-        isManuallyClosed = false;
-        clearTimeout(reconnectTimer);
-        stopHeartbeat();
-        showToast('Reconnecting terminal...', 'ok');
-        connectWebSocket();
+  function initHeaderControls() {
+    const kbdBtn = document.getElementById('kbd-toggle-btn');
+    if (kbdBtn) {
+      kbdBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        toggleSoftKeyboard();
       });
     }
 
-    const kbdToggleBtn = document.getElementById('kbd-toggle-btn');
-    if (kbdToggleBtn) {
-      kbdToggleBtn.addEventListener('click', () => {
-        toggleSoftKeyboard();
+    const menuBtn = document.getElementById('header-menu-btn');
+    const dropdown = document.getElementById('header-dropdown');
+    if (menuBtn && dropdown) {
+      menuBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        dropdown.hidden = !dropdown.hidden;
+      });
+
+      document.addEventListener('pointerdown', (e) => {
+        if (!dropdown.hidden && !dropdown.contains(e.target) && e.target !== menuBtn) {
+          dropdown.hidden = true;
+        }
       });
     }
 
     const composerToggleBtn = document.getElementById('composer-toggle-btn');
     if (composerToggleBtn) {
-      composerToggleBtn.addEventListener('click', () => {
+      composerToggleBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        if (dropdown) dropdown.hidden = true;
         toggleComposer();
+      });
+    }
+
+    const fontDecBtn = document.getElementById('font-decrease-btn');
+    if (fontDecBtn) {
+      fontDecBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        changeFontSize(-1);
+      });
+    }
+
+    const fontIncBtn = document.getElementById('font-increase-btn');
+    if (fontIncBtn) {
+      fontIncBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        changeFontSize(1);
+      });
+    }
+
+    const reconnectBtn = document.getElementById('reconnect-btn');
+    if (reconnectBtn) {
+      reconnectBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        if (dropdown) dropdown.hidden = true;
+        reconnectAttempts = 0;
+        isManuallyClosed = false;
+        clearTimeout(reconnectTimer);
+        stopHeartbeat();
+        showToast('Reconnecting terminal...', 'info');
+        connectWebSocket();
       });
     }
 
@@ -935,7 +941,6 @@
       });
     }
 
-    // Native Select Overlay Actions
     const selectCopyBtn = document.getElementById('select-copy-btn');
     if (selectCopyBtn) {
       selectCopyBtn.addEventListener('click', () => {
@@ -953,71 +958,64 @@
     const selectCloseBtn = document.getElementById('select-close-btn');
     if (selectCloseBtn) {
       selectCloseBtn.addEventListener('click', () => {
-        triggerHaptic(10);
         closeSelectMode();
       });
     }
+  }
 
-    const fontDec = document.getElementById('font-decrease-btn');
-    if (fontDec) {
-      fontDec.addEventListener('click', () => {
-        triggerHaptic(10);
-        if (currentFontSize > 10 && term) {
-          currentFontSize -= 1;
-          term.options.fontSize = currentFontSize;
-          if (fitAddon) {
-            fitAddon.fit();
-            sendResize(term.cols, term.rows);
-          }
-        }
-      });
-    }
-
-    const fontInc = document.getElementById('font-increase-btn');
-    if (fontInc) {
-      fontInc.addEventListener('click', () => {
-        triggerHaptic(10);
-        if (currentFontSize < 22 && term) {
-          currentFontSize += 1;
-          term.options.fontSize = currentFontSize;
-          if (fitAddon) {
-            fitAddon.fit();
-            sendResize(term.cols, term.rows);
-          }
-        }
-      });
-    }
-
-    // Debounced window and visualViewport resize listener with iOS visualViewport height anchoring
-    let resizeDebounceTimer = null;
-    const scaffold = document.querySelector('.terminal-scaffold');
-
-    const handleResize = () => {
-      if (window.visualViewport && scaffold) {
-        scaffold.style.height = `${window.visualViewport.height}px`;
+  // Rapid background wake-up handler
+  function handleWakeup() {
+    if (document.visibilityState === 'visible') {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reconnectAttempts = 0;
+        clearTimeout(reconnectTimer);
+        stopHeartbeat();
+        connectWebSocket();
+        return;
       }
-      clearTimeout(resizeDebounceTimer);
-      resizeDebounceTimer = setTimeout(() => {
-        if (fitAddon && term) {
-          fitAddon.fit();
-          sendResize(term.cols, term.rows);
-        }
-      }, 150);
-    };
-
-    window.addEventListener('resize', handleResize);
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', handleResize);
-      handleResize();
+      try {
+        ws.send(JSON.stringify({ type: 'ping' }));
+        clearTimeout(pongTimeoutTimer);
+        pongTimeoutTimer = setTimeout(() => {
+          if (ws) {
+            ws.onopen = null;
+            ws.onmessage = null;
+            ws.onclose = null;
+            ws.onerror = null;
+            try { ws.close(); } catch (_) {}
+            ws = null;
+          }
+          connectWebSocket();
+        }, 2500);
+      } catch (_) {
+        connectWebSocket();
+      }
     }
   }
 
-  // Boot sequence
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('visibilitychange', handleWakeup);
+  window.addEventListener('pageshow', handleWakeup);
+  window.addEventListener('online', handleWakeup);
+
+  // Viewport tracking for soft keyboard state and safe-area adjustments
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => {
+      const isKeyboardOpen = window.visualViewport.height < window.innerHeight - 80;
+      if (isKeyboardOpen) {
+        document.body.classList.add('keyboard-open');
+      } else {
+        document.body.classList.remove('keyboard-open');
+      }
+      debouncedFit();
+    });
+  } else {
+    window.addEventListener('resize', () => debouncedFit());
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
     initTerminal();
     initAccessoryBar();
-    initQuickChips();
-    initTools();
+    initHeaderControls();
     connectWebSocket();
   });
 })();

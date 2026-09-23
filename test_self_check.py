@@ -410,6 +410,63 @@ def run_checks():
         reconn_sock.close()
         print("PASS: Live WebSocket terminal interactive session, binary frame streaming, and session persistence verified")
 
+        # 4. Multi-client session detachment check (Bug #7: old socket must receive close code 4000)
+        sock_a = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock_a.connect(("127.0.0.1", test_port))
+        sock_a.sendall((
+            f"GET /api/terminal/ws?token={enc_token}{otp_param}&cols=80&rows=24 HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{test_port}\r\n"
+            f"Origin: http://127.0.0.1:{test_port}\r\n"
+            "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        ).encode("utf-8"))
+        assert "101 Switching Protocols" in sock_a.recv(1024).decode("utf-8")
+        meta_raw = sock_a.recv(1024)
+        p_len_a = meta_raw[1] & 0x7F
+        meta_a = json.loads(meta_raw[2:2 + p_len_a].decode("utf-8"))
+        sess_a_id = meta_a["id"]
+
+        # Client B attaches to same session
+        sock_b = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock_b.connect(("127.0.0.1", test_port))
+        sock_b.sendall((
+            f"GET /api/terminal/ws?token={enc_token}{otp_param}&session_id={sess_a_id}&cols=80&rows=24 HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{test_port}\r\n"
+            f"Origin: http://127.0.0.1:{test_port}\r\n"
+            "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        ).encode("utf-8"))
+        assert "101 Switching Protocols" in sock_b.recv(1024).decode("utf-8")
+
+        # Client A should receive close frame with code 4000
+        sock_a.settimeout(2.0)
+        close_frame_a = sock_a.recv(1024)
+        assert len(close_frame_a) >= 4 and close_frame_a[0] == 0x88, "Expected close frame on replaced client"
+        import struct
+        close_code_a = struct.unpack("!H", close_frame_a[2:4])[0]
+        assert close_code_a == 4000, f"Expected close code 4000, got: {close_code_a}"
+        sock_a.close()
+
+        # 5. Natural shell exit check (Bug #8: exit sends close code 4001)
+        exit_cmd = b"exit\n"
+        m_exit = b"\x11\x22\x33\x44"
+        sock_b.sendall(bytearray([0x82, 0x80 | len(exit_cmd)]) + m_exit + bytes(b ^ m_exit[i % 4] for i, b in enumerate(exit_cmd)))
+        sock_b.settimeout(3.0)
+        shell_closed = False
+        for _ in range(10):
+            try:
+                frame_b = sock_b.recv(2048)
+                if frame_b and frame_b[0] == 0x88:
+                    close_code_b = struct.unpack("!H", frame_b[2:4])[0]
+                    assert close_code_b == 4001, f"Expected close code 4001, got: {close_code_b}"
+                    shell_closed = True
+                    break
+            except Exception:
+                break
+        assert shell_closed is True, "Expected close frame 4001 on shell exit"
+        sock_b.close()
+        print("PASS: Multi-client detachment (code 4000) and shell exit lifecycle (code 4001) verified")
+
         # Test WebSocket authentication via session cookie without query token (pure cookie auth)
         ws_sock_cookie = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         ws_sock_cookie.connect(("127.0.0.1", test_port))

@@ -149,3 +149,31 @@
 - [x] **Killswitch Enforcement:** টার্মিনাল ডিকনফিগার বা ডিসেবল হলে লাইভ সমস্ত PTY সেশন সাথে সাথে কিল করা হয়।
 - [x] **24-Hour Connection Duration Ceiling:** যেকোনো সেশনের সর্বোচ্চ আয়ু ২৪ ঘণ্টা পর্যন্ত সীমাবদ্ধ।
 - [x] **Strict HTTP-Only Device Binding:** কুকি হাইজ্যাকিং প্রতিরোধে ডিভাইস ফিঙ্গারপ্রিন্ট বাইন্ডিং ও কুয়েরি টোকেন লিকেজ প্রটেকশন।
+
+---
+
+## Task 5: Post-Audit Refinements, Thread-Safety & UI Simplification
+
+### 1. Critical Concurrency & Session Lifecycle (Bugs 1–8)
+- [x] **`ClientConn` Asynchronous Sender Queue (Bug 1 & 6):** প্রতিটি ক্লায়েন্ট ওয়েবসকেটের জন্য ডেডিকেটেড ব্যাকগ্রাউন্ড রাইটার থ্রেড ও বাউন্ডেড কিউ (`maxsize=256`) যোগ করা হয়েছে। মোবাইল নেটওয়ার্ক স্লো বা স্টল হলেও `sendall()` কল PTY বা `self.lock`-কে ফ্রিজ করে না। কিউ ফুল হলে স্লো ক্লায়েন্ট স্বয়ংক্রিয়ভাবে ড্রপ হয় এবং PTY সেশন অক্ষত থাকে।
+- [x] **Session Reaper Shell Clean-up (Bug 2):** `_reaper_loop`-এ মেয়াদোত্তীর্ণ বা ডেড সেশনগুলোকে শুধু ডিকশনারি থেকে না মুছে `proc.close()` কল করে শেল প্রসেস ও ফাইল ডেসক্রিপ্টর সম্পূর্ণ টার্মিনেট করা হয়েছে।
+- [x] **Composer Execution Fix (Bug 3):** `term.paste(rawVal)` এবং `sendInput('\r')` আলাদা করা হয়েছে, যাতে ব্র্যাকেটেড পেস্ট মোডের বাইরে এন্টার কী এক্সিকিউট হয় এবং ব্যাশ ৫.১+ এ কমান্ড অবিলম্বে রান করে।
+- [x] **Reconnect Duplicate & Escape Split Fix (Bug 4):** রিকানেক্টের সময় প্রথমে `term.reset()` কল করে ব্যাকলগ রিপ্লে এবং তারপর একটি ছোট রিসাইজ নাজ (`cols - 1` -> `cols`) পাঠিয়ে TUI অ্যাপের (`vim`, `htop`, Claude Code) স্ক্রিন ক্লিনলি রিড্র করা হয়।
+- [x] **Reattach PTY Resize (Bug 5):** রি-অ্যাটাচে সার্ভার-সাইড `resize(rows, cols)` কল এবং ক্লায়েন্টে `onopen`-এ `lastSentCols = lastSentRows = -1` রিসেট নিশ্চিত করা হয়েছে।
+- [x] **Multi-Client Zombie Tab Drop (Bug 7):** একই সেশন অন্য ট্যাব বা ডিভাইসে ওপেন হলে পুরাতন কানেকশনকে কাস্টম ক্লোজ কোড `4000` ("Attached on another device") পাঠিয়ে বন্ধ করা হয়।
+- [x] **Shell Exit Detection (Bug 8):** শেল থেকে `exit` দিলে সার্ভার ক্লোজ কোড `4001` পাঠায় এবং ক্লায়েন্ট সেশন স্টোরেজ মুছে অটো-রিকানেক্ট বন্ধ রাখে।
+
+### 2. Input & Mobile Ergonomics (Bugs 9–14)
+- [x] **Gboard Autocorrect & Smart Punctuation (Bugs 9–10):** `beforeinput`-এ `getTargetRanges()` থেকে সঠিক ডিলিট কাউন্ট বের করা এবং ইনপুটের সমস্ত টেক্সট `sanitizeTerminalInput()` দিয়ে ক্লিন করা হয়েছে।
+- [x] **Alt-Screen Mouse Wheel (Bug 11):** অল্টারনেট স্ক্রিনে মাউস ট্র্যাকিং অন থাকলে শুধুমাত্র মাউস হুইল সিকোয়েন্স (`\x1b[<64...M`) পাঠানো হয়; অ্যারো কী পাঠানো বন্ধ করা হয়েছে যাতে প্রম্পট হিস্ট্রি নষ্ট না হয়।
+- [x] **Header Button Focus Guard (Bug 12):** সমস্ত হেডার ও ড্রপডাউন বাটনে `pointerdown` + `e.preventDefault()` প্রয়োগ করে ভার্চুয়াল কীবোর্ডের ফোকাস বজায় রাখা হয়েছে।
+- [x] **Fast Background Resume (Bug 13):** `visibilitychange`/`pageshow`/`online`-এ ২.৫ সেকেন্ডের ফাস্ট পিং-পং টাইমআউট দিয়ে অর্ধ-মৃত সকেট অবিলম্বে রিকানেক্ট করা হয়।
+- [x] **Font Readiness (Bug 14):** `document.fonts.ready` সম্পূর্ণ হওয়ার পর টার্মিনালের ডাইমেনশন ফিট করা হয়।
+
+### 3. UI Simplification & Screen Real Estate (Bugs 15–21)
+- [x] **Compact 44px Header & Dropdown Menu (Bugs 15, 16):** হেডার থেকে অতিরিক্ত বাটন সরিয়ে `‹`, স্ট্যাটাস ডট এবং `⋯` ড্রপডাউন মেনু যুক্ত করা হয়েছে। ৩২০px-৩৬০px স্ক্রিনে কোনো ওভারফ্লো বা র‍্যাপিং হয় না।
+- [x] **Permanent Quick Chips Removed (Bug 18):** কুইক চিপস বার অপসারণ করে টার্মিনালের দৃশ্যমান উচ্চতা ~২৬% বৃদ্ধি করা হয়েছে।
+- [x] **Composer Overlay (Bug 21):** কম্পোজার ড্রয়ারকে অ্যাবসোলিউট ওভারলে হিসেবে সেট করায় এটি খোলার পর টার্মিনালের লেআউট পুশ বা অতিরিক্ত `SIGWINCH` হয় না।
+- [x] **Optimized Accessory Bar Order (Bug 17):** সবচেয়ে গুরুত্বপূর্ণ কীগুলো (`ESC`, `CTRL`, `ALT`, `TAB`, অ্যারো, `^C`, `📋`, `✏️`) এক স্ক্রিনে ফিট করা হয়েছে।
+- [x] **Safe-Area Layout Polish (Bug 20):** কীবোর্ড ওপেন থাকলে এক্সেসরি বারের অপ্রয়োজনীয় বটম প্যাডিং অপসারণ করা হয়েছে।
+

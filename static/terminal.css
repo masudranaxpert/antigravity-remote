@@ -62,24 +62,25 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 48px;
-  padding: 0 12px;
+  height: 44px;
+  padding: env(safe-area-inset-top, 0px) 10px 0 10px;
   background-color: var(--surface);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  z-index: 20;
+  z-index: 30;
+  position: relative;
 }
 
 .header-left, .header-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .header-center {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
@@ -87,9 +88,13 @@ html, body {
 
 .session-label {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--text-secondary);
   letter-spacing: 0.02em;
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-dot {
@@ -98,6 +103,7 @@ html, body {
   border-radius: 50%;
   background-color: var(--text-tertiary);
   transition: background-color 0.2s ease;
+  flex-shrink: 0;
 }
 
 .status-dot.active {
@@ -113,15 +119,15 @@ html, body {
 .nav-back-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
   border-radius: var(--radius-sm);
   background-color: var(--surface-raised);
   border: 1px solid var(--border);
   color: var(--text-primary);
   text-decoration: none;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 14px;
   transition: all 0.15s ease;
 }
 
@@ -135,18 +141,26 @@ html, body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 30px;
-  padding: 0 9px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
   border-radius: var(--radius-sm);
   background-color: var(--surface-raised);
   border: 1px solid var(--border);
-  color: var(--text-secondary);
-  font-size: 11.5px;
+  color: var(--text-primary);
+  font-size: 13px;
   font-weight: 600;
-  font-family: var(--font-mono);
   cursor: pointer;
   outline: none;
   transition: all 0.15s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tool-btn.icon-btn {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Color Emoji', sans-serif;
+  font-size: 15px;
+  line-height: 1;
 }
 
 .tool-btn:hover {
@@ -156,71 +170,108 @@ html, body {
 }
 
 .tool-btn:active {
-  transform: scale(0.96);
+  transform: scale(0.94);
 }
 
-.logout-tool-btn {
-  text-decoration: none;
-  color: #f87171;
-  background-color: rgba(239, 68, 68, 0.08);
-  border-color: rgba(239, 68, 68, 0.22);
+/* Header Dropdown Menu */
+.header-dropdown {
+  position: absolute;
+  top: 48px;
+  right: 10px;
+  width: 200px;
+  background-color: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 6px;
+  box-shadow: 0 10px 30px -4px rgba(0, 0, 0, 0.7);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: dropdownFade 0.12s ease;
 }
 
-.logout-tool-btn:hover {
-  color: #fca5a5;
-  border-color: rgba(239, 68, 68, 0.45);
-  background-color: rgba(239, 68, 68, 0.16);
-  box-shadow: 0 0 8px rgba(239, 68, 68, 0.18);
+.header-dropdown[hidden] {
+  display: none !important;
 }
 
-/* Quick Commands Bar */
-.quick-commands-bar {
+@keyframes dropdownFade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dropdown-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  background-color: rgba(20, 23, 30, 0.6);
-  border-bottom: 1px solid var(--border);
-  overflow-x: auto;
-  white-space: nowrap;
-  flex-shrink: 0;
-  -webkit-overflow-scrolling: touch;
-  touch-action: pan-x;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  outline: none;
+  transition: background-color 0.1s ease;
+  text-align: left;
 }
 
-.quick-commands-bar::-webkit-scrollbar {
-  display: none;
+.dropdown-item:hover, .dropdown-item:active {
+  background-color: var(--surface-hover);
 }
 
-.quick-chip {
+.dropdown-item.danger {
+  color: #f87171;
+}
+
+.dropdown-item.danger:hover {
+  background-color: rgba(239, 68, 68, 0.14);
+}
+
+.dropdown-divider {
+  height: 1px;
+  background-color: var(--border);
+  margin: 4px 0;
+}
+
+.dropdown-font-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.font-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.font-btn {
   display: inline-flex;
   align-items: center;
-  padding: 4px 9px;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
   border-radius: var(--radius-sm);
   background-color: var(--surface-raised);
   border: 1px solid var(--border);
-  color: var(--accent);
+  color: var(--text-primary);
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   outline: none;
-  transition: all 0.12s ease;
-  user-select: none;
-  -webkit-user-select: none;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  flex-shrink: 0;
 }
 
-.quick-chip:hover {
+.font-btn:active {
   background-color: var(--surface-hover);
-  border-color: var(--accent-border);
-}
-
-.quick-chip:active {
-  background-color: var(--accent-bg);
-  transform: scale(0.96);
+  transform: scale(0.94);
 }
 
 /* Terminal Canvas Container */
@@ -391,13 +442,17 @@ html, body {
   display: none !important;
 }
 
-/* Slide-down Command Composer Drawer */
+/* Slide-down Command Composer Drawer (Floating Overlay - no layout push or resize) */
 .composer-drawer {
+  position: absolute;
+  top: 44px;
+  left: 0;
+  right: 0;
   background-color: var(--surface);
   border-bottom: 1px solid var(--border-strong);
   padding: 8px 12px;
-  flex-shrink: 0;
-  z-index: 25;
+  z-index: 50;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
   animation: composerSlideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 

@@ -474,7 +474,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 origin_host = urlparse(origin).netloc.split(":")[0].lower()
                 host_header = self.headers.get("Host", "").split(":")[0].lower()
                 allowed_hosts = {host_header, "localhost", "127.0.0.1"}
-                if origin_host not in allowed_hosts and not origin_host.endswith(".masud-rana.me"):
+                extra_env = os.environ.get("ALLOWED_ORIGIN_HOSTS", "")
+                if extra_env:
+                    allowed_hosts.update(h.strip().lower() for h in extra_env.split(",") if h.strip())
+                if origin_host not in allowed_hosts:
                     record_client_access(self.headers, self.client_address, path, "WS", 403, False, "origin_rejected")
                     return self.send_json({"error": "forbidden_origin"}, 403)
 
